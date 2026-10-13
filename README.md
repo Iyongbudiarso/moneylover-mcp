@@ -3,6 +3,7 @@
 [![CI](https://github.com/Iyongbudiarso/moneylover-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Iyongbudiarso/moneylover-mcp/actions/workflows/ci.yml)
 [![Security audit](https://github.com/Iyongbudiarso/moneylover-mcp/actions/workflows/audit.yml/badge.svg)](https://github.com/Iyongbudiarso/moneylover-mcp/actions/workflows/audit.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Iyongbudiarso/moneylover-mcp/badge)](https://scorecard.dev/viewer/?uri=github.com/Iyongbudiarso/moneylover-mcp)
+[![MCP Registry](https://img.shields.io/badge/MCP%20Registry-com.iyongbudiarso%2Fmoneylover--mcp-blue)](https://registry.modelcontextprotocol.io/v0.1/servers?search=com.iyongbudiarso/moneylover-mcp)
 
 An [MCP](https://modelcontextprotocol.io) server that lets an AI agent or chatbot read your
 [Money Lover](https://moneylover.me) data and, if you allow it, add transactions. It talks to
@@ -110,9 +111,10 @@ as with `login`), or leave both empty and run `moneylover-mcp login` once with a
 [prebuilt binary](#prebuilt-binary-no-rust-needed) — the extension reuses the stored token.
 Adding transactions stays **off** unless you enable it in the extension's settings.
 
-The same listing is published to the official MCP Registry as
-`com.iyongbudiarso/moneylover-mcp`, which is verified by a `v=MCPv1; …` TXT record on
-`iyongbudiarso.com`. That proves who published the entry; it is not a statement that the code is
+The same bundles are listed in the official MCP Registry as
+[`com.iyongbudiarso/moneylover-mcp`](https://registry.modelcontextprotocol.io/v0.1/servers?search=com.iyongbudiarso/moneylover-mcp),
+which is verified by a `v=MCPv1; …` TXT record on `iyongbudiarso.com`. Registry-aware clients
+check each download against the SHA-256 recorded there. That proves who published the entry; it is not a statement that the code is
 safe. Check the [trust model](#trust-model) and the source instead.
 
 ### From source
