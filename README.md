@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/Iyongbudiarso/moneylover-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Iyongbudiarso/moneylover-mcp/actions/workflows/ci.yml)
 [![Security audit](https://github.com/Iyongbudiarso/moneylover-mcp/actions/workflows/audit.yml/badge.svg)](https://github.com/Iyongbudiarso/moneylover-mcp/actions/workflows/audit.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Iyongbudiarso/moneylover-mcp/badge)](https://scorecard.dev/viewer/?uri=github.com/Iyongbudiarso/moneylover-mcp)
 
 An [MCP](https://modelcontextprotocol.io) server that lets an AI agent or chatbot read your
 [Money Lover](https://moneylover.me) data and, if you allow it, add transactions. It talks to
@@ -17,6 +18,19 @@ the client over **stdio**.
 > **You use this software entirely at your own risk**, including the risk of account restrictions,
 > lost or incorrect data, and incorrect transactions. It is provided "AS IS" under the MIT license,
 > without warranty of any kind. Back up your data and try it on a throwaway wallet first.
+
+## Trust model
+
+What a reviewer should know before granting this server access to a finance account. Each claim
+is enforced in code and checked in CI, not just stated here.
+
+| Claim | How it is enforced |
+|---|---|
+| **The token is full-access; read-only is enforced by the server.** Money Lover has no scoped or read-only tokens. | Write tools are not even registered unless `MONEYLOVER_ALLOW_WRITE=true`; when they are, a server-side guard limits them ([Security](#security)). |
+| **Network egress goes only to Money Lover**: `web.moneylover.me` and `oauth.moneylover.me`, HTTPS only. No telemetry, no update checks, no other hosts. | Endpoints are compile-time constants that no environment variable can change; redirects are never followed. [`tests/egress.rs`](tests/egress.rs) fails if any other URL appears in the source. |
+| **Credentials stay local.** The password is used for login and never stored; tokens live in a `0600` file; nothing secret is logged or returned to the AI. | [`src/token_store.rs`](src/token_store.rs), redacting `Debug` impls, tests. |
+| **Dependencies are pinned and vetted.** | `Cargo.lock` + `--locked` everywhere; [`cargo-deny`](deny.toml) allows crates.io sources and permissive licenses only and fails on RustSec advisories or yanked crates (weekly and on change); GitHub Actions pinned to commit SHAs; Dependabot. |
+| **Release binaries are built from this repository.** | Every release archive has a signed SLSA build-provenance attestation (`gh attestation verify`) and a `SHA256SUMS` entry. |
 
 ## Tools
 
@@ -82,8 +96,8 @@ cargo install --locked --git https://github.com/Iyongbudiarso/moneylover-mcp
 cargo build --locked --release   # binary: target/release/moneylover-mcp
 ```
 
-`--locked` builds with the exact dependency versions in `Cargo.lock`, which CI audits with
-`cargo audit`, instead of whatever is newest on crates.io.
+`--locked` builds with the exact dependency versions in `Cargo.lock`, which CI vets with
+`cargo deny`, instead of whatever is newest on crates.io.
 
 ### Log in
 

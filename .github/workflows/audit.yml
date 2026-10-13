@@ -3,9 +3,9 @@ name: Security audit
 on:
   push:
     branches: [main]
-    paths: [Cargo.toml, Cargo.lock, .github/workflows/audit.yml]
+    paths: [Cargo.toml, Cargo.lock, deny.toml, .github/workflows/audit.yml]
   pull_request:
-    paths: [Cargo.toml, Cargo.lock, .github/workflows/audit.yml]
+    paths: [Cargo.toml, Cargo.lock, deny.toml, .github/workflows/audit.yml]
   # New advisories are published all the time, also for code that did not change.
   schedule:
     - cron: "17 3 * * 1"
@@ -15,8 +15,8 @@ permissions:
   contents: read
 
 jobs:
-  cargo-audit:
-    name: cargo audit
+  cargo-deny:
+    name: cargo deny (advisories, licenses, sources, bans)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -24,6 +24,7 @@ jobs:
           persist-credentials: false
       - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
-          tool: cargo-audit
-      # Fails on known vulnerabilities and on yanked crates in Cargo.lock.
-      - run: cargo audit --deny warnings
+          tool: cargo-deny@0.20.2
+      # Fails on known vulnerabilities (RustSec), yanked crates, non-permissive
+      # licenses, and any dependency that does not come from crates.io. See deny.toml.
+      - run: cargo deny --locked check

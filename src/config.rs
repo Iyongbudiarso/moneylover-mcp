@@ -45,7 +45,7 @@ impl Config {
     }
 
     pub fn from_lookup(get: impl Fn(&str) -> Option<String>) -> Result<Self> {
-        let env = |key: &str| get(key).filter(|v| !v.is_empty());
+        let env = |key: &str| get(key).filter(|v| !v.is_empty() && !is_unfilled_placeholder(v));
         Ok(Self {
             email: env("MONEYLOVER_EMAIL"),
             password: env("MONEYLOVER_PASSWORD"),
@@ -81,6 +81,13 @@ impl Config {
             oauth_base: DEFAULT_OAUTH_BASE.to_string(),
         })
     }
+}
+
+/// Some MCP clients (MCPB bundles) pass `${user_config.x}` through literally when the
+/// user left an optional field empty; that means "not set", not a value.
+fn is_unfilled_placeholder(value: &str) -> bool {
+    let value = value.trim();
+    value.starts_with("${") && value.ends_with('}')
 }
 
 fn is_truthy(value: &str) -> bool {
@@ -306,6 +313,18 @@ mod tests {
                 "{key}={bad}"
             );
         }
+    }
+
+    #[test]
+    fn unfilled_client_placeholders_count_as_unset() {
+        let cfg = Config::from_lookup(lookup(&[
+            ("HOME", "/h"),
+            ("MONEYLOVER_EMAIL", "${user_config.email}"),
+            ("MONEYLOVER_TIMEZONE", "${user_config.timezone}"),
+        ]))
+        .unwrap();
+        assert!(cfg.email.is_none());
+        assert_eq!(cfg.timezone, chrono_tz::Asia::Jakarta);
     }
 
     #[test]
