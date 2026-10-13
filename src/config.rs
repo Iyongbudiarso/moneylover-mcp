@@ -217,16 +217,19 @@ mod tests {
 
     #[test]
     fn overrides_are_respected() {
+        // Absolute on every OS ("/tmp/..." is not absolute on Windows).
+        let token_path = std::env::temp_dir().join("t.json");
+        let token_path_str = token_path.to_string_lossy().to_string();
         let cfg = Config::from_lookup(lookup(&[
             ("MONEYLOVER_ALLOW_WRITE", "TRUE"),
             ("MONEYLOVER_TIMEZONE", "Europe/Amsterdam"),
-            ("MONEYLOVER_TOKEN_PATH", "/tmp/t.json"),
+            ("MONEYLOVER_TOKEN_PATH", token_path_str.as_str()),
             ("MONEYLOVER_EMAIL", "a@b.c"),
         ]))
         .unwrap();
         assert!(cfg.allow_write);
         assert_eq!(cfg.timezone, chrono_tz::Europe::Amsterdam);
-        assert_eq!(cfg.token_path, PathBuf::from("/tmp/t.json"));
+        assert_eq!(cfg.token_path, token_path);
         assert_eq!(cfg.email.as_deref(), Some("a@b.c"));
     }
 

@@ -1,5 +1,8 @@
 # moneylover-mcp
 
+[![CI](https://github.com/Iyongbudiarso/moneylover-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Iyongbudiarso/moneylover-mcp/actions/workflows/ci.yml)
+[![Security audit](https://github.com/Iyongbudiarso/moneylover-mcp/actions/workflows/audit.yml/badge.svg)](https://github.com/Iyongbudiarso/moneylover-mcp/actions/workflows/audit.yml)
+
 An [MCP](https://modelcontextprotocol.io) server that lets an AI agent or chatbot read your
 [Money Lover](https://moneylover.me) data and, if you allow it, add transactions. It talks to
 the client over **stdio**.
