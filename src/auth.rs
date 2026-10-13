@@ -240,7 +240,9 @@ impl Session {
     async fn login(&self) -> Result<Tokens> {
         let (Some(email), Some(password)) = (&self.cfg.email, &self.cfg.password) else {
             return Err(Error::Auth(
-                "no valid stored token and no credentials; set MONEYLOVER_EMAIL and MONEYLOVER_PASSWORD".into(),
+                "no stored token and no credentials; set the email and password (MONEYLOVER_EMAIL, \
+                 MONEYLOVER_PASSWORD) or run `moneylover-mcp login` once"
+                    .into(),
             ));
         };
         tracing::info!("logging in to Money Lover (this uses one device slot)");

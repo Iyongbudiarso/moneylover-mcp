@@ -1,0 +1,93 @@
+{
+  "$schema": "https://raw.githubusercontent.com/modelcontextprotocol/mcpb/main/schemas/mcpb-manifest-v0.3.schema.json",
+  "manifest_version": "0.3",
+  "name": "moneylover-mcp",
+  "display_name": "Money Lover",
+  "version": "0.0.0",
+  "description": "Read your Money Lover wallets, categories and transactions, and optionally add transactions.",
+  "long_description": "Unofficial MCP server for the Money Lover personal finance app. It lets an AI assistant look up wallets and balances, list and total transactions, and - only when you enable it - record new transactions.\n\nReading is the default. Writing is off until you turn it on, and even then it is fenced in: wallet allowlist, maximum amount, hourly limit, duplicate detection and a date window, all enforced by the server rather than by the AI.\n\nThis extension talks only to web.moneylover.me and oauth.moneylover.me over HTTPS. There is no telemetry and no other network traffic. Your password is never stored; it is exchanged for a token, and only the token is saved. Not affiliated with or endorsed by Money Lover; use at your own risk.",
+  "author": {
+    "name": "Iyong Budiarso",
+    "url": "https://github.com/Iyongbudiarso"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Iyongbudiarso/moneylover-mcp"
+  },
+  "homepage": "https://github.com/Iyongbudiarso/moneylover-mcp",
+  "documentation": "https://github.com/Iyongbudiarso/moneylover-mcp#readme",
+  "support": "https://github.com/Iyongbudiarso/moneylover-mcp/issues",
+  "license": "MIT",
+  "keywords": [
+    "money lover",
+    "personal finance",
+    "budget",
+    "expenses",
+    "transactions"
+  ],
+  "privacy_policies": ["https://moneylover.me/policy/"],
+  "server": {
+    "type": "binary",
+    "entry_point": "server/moneylover-mcp",
+    "mcp_config": {
+      "command": "${__dirname}/server/moneylover-mcp",
+      "args": [],
+      "env": {
+        "MONEYLOVER_EMAIL": "${user_config.email}",
+        "MONEYLOVER_PASSWORD": "${user_config.password}",
+        "MONEYLOVER_TIMEZONE": "${user_config.timezone}",
+        "MONEYLOVER_ALLOW_WRITE": "${user_config.allow_write}"
+      }
+    }
+  },
+  "user_config": {
+    "email": {
+      "type": "string",
+      "title": "Money Lover email",
+      "description": "The email you sign in to Money Lover with. Leave both fields empty if you prefer to run `moneylover-mcp login` once instead; the extension reuses the stored token."
+    },
+    "password": {
+      "type": "string",
+      "title": "Money Lover password",
+      "description": "Used once to log in, then exchanged for a token. It is never written to disk: only the token is stored, under your user config directory. Google/Facebook/Apple sign-in accounts have no password and cannot use this.",
+      "sensitive": true
+    },
+    "timezone": {
+      "type": "string",
+      "title": "Timezone",
+      "description": "IANA timezone used to interpret dates (for example Asia/Jakarta).",
+      "default": "Asia/Jakarta"
+    },
+    "allow_write": {
+      "type": "boolean",
+      "title": "Allow adding transactions",
+      "description": "Off by default. When on, the add_transaction tool is registered, so the assistant can create transactions (you can still fence it in with a wallet allowlist and a maximum amount via environment variables).",
+      "default": false
+    }
+  },
+  "tools": [
+    {
+      "name": "list_wallets",
+      "description": "List all Money Lover wallets with their currency and balance."
+    },
+    {
+      "name": "list_categories",
+      "description": "List income and expense categories, optionally for one wallet."
+    },
+    {
+      "name": "list_transactions",
+      "description": "List transactions in a date range, newest first."
+    },
+    {
+      "name": "summarize_spending",
+      "description": "Total income or expenses per category and currency for a date range."
+    },
+    {
+      "name": "add_transaction",
+      "description": "Create a transaction. Only registered when adding transactions is enabled. Supports dry_run."
+    }
+  ],
+  "compatibility": {
+    "platforms": ["darwin", "linux", "win32"]
+  }
+}

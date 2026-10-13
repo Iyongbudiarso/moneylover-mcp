@@ -142,3 +142,39 @@ jobs:
             --title "${GITHUB_REF_NAME}" \
             --notes-file notes.md \
             --verify-tag
+
+  bundle:
+    name: build MCPB bundles
+    needs: publish # the release must exist: the assets' URLs go into server.json
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: macos-latest # lipo merges the two macOS slices into one universal binary
+    permissions:
+      contents: write # attach the bundles to the release
+      id-token: write # build provenance attestation
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Assemble the bundles
+        run: bash scripts/build-mcpb.sh "${GITHUB_REF_NAME}"
+      - name: Check that a bundle actually runs
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/bundle-check"
+          unzip -q mcpb/out/moneylover-mcp-darwin.mcpb -d "$RUNNER_TEMP/bundle-check"
+          "$RUNNER_TEMP/bundle-check/server/${BIN}" --version
+          lipo -archs "$RUNNER_TEMP/bundle-check/server/${BIN}"
+      - name: Attest bundle provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: mcpb/out/*.mcpb
+      - name: Attach the bundles to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release upload "${GITHUB_REF_NAME}" mcpb/out/* --clobber

@@ -31,6 +31,7 @@ is enforced in code and checked in CI, not just stated here.
 | **Credentials stay local.** The password is used for login and never stored; tokens live in a `0600` file; nothing secret is logged or returned to the AI. | [`src/token_store.rs`](src/token_store.rs), redacting `Debug` impls, tests. |
 | **Dependencies are pinned and vetted.** | `Cargo.lock` + `--locked` everywhere; [`cargo-deny`](deny.toml) allows crates.io sources and permissive licenses only and fails on RustSec advisories or yanked crates (weekly and on change); GitHub Actions pinned to commit SHAs; Dependabot. |
 | **Release binaries are built from this repository.** | Every release archive has a signed SLSA build-provenance attestation (`gh attestation verify`) and a `SHA256SUMS` entry. |
+| **The published bundles are bound to this repository and to this domain.** | The listing in the official MCP Registry uses the DNS-verified namespace `com.iyongbudiarso/moneylover-mcp`; the hash of every `.mcpb` is recorded in the release's `server.json`, and each bundle carries the same build-provenance attestation as the archives. |
 
 ## Tools
 
@@ -85,6 +86,34 @@ Extract it and put `moneylover-mcp` somewhere on your `PATH`. The binaries are n
 Apple or Microsoft certificate. On macOS, a file downloaded with a browser is blocked by
 Gatekeeper; after verifying it, allow it with `xattr -d com.apple.quarantine moneylover-mcp`.
 On Windows, SmartScreen may ask for confirmation.
+
+### MCPB bundle (Claude Desktop and other MCPB clients)
+
+Clients that understand [MCP Bundles](https://github.com/modelcontextprotocol/mcpb) can install
+the server as an extension instead. Download the `.mcpb` for your platform from the
+[latest release](https://github.com/Iyongbudiarso/moneylover-mcp/releases/latest) and open it, or
+point your client at the file:
+
+| Platform | Bundle |
+|---|---|
+| macOS (Apple Silicon and Intel) | `moneylover-mcp-darwin.mcpb` |
+| Linux x86_64 | `moneylover-mcp-linux-x86_64.mcpb` |
+| Linux ARM64 | `moneylover-mcp-linux-aarch64.mcpb` |
+| Windows x86_64 | `moneylover-mcp-windows-x86_64.mcpb` |
+
+There is one bundle per platform because a bundle carries a single executable and MCPB cannot
+choose between executables by CPU architecture; the macOS bundle holds one universal binary.
+
+When the client asks for configuration you can either enter your Money Lover email and password
+(the client keeps the password in the OS keychain, and the server exchanges it for a token, exactly
+as with `login`), or leave both empty and run `moneylover-mcp login` once with a
+[prebuilt binary](#prebuilt-binary-no-rust-needed) — the extension reuses the stored token.
+Adding transactions stays **off** unless you enable it in the extension's settings.
+
+The same listing is published to the official MCP Registry as
+`com.iyongbudiarso/moneylover-mcp`, which is verified by a `v=MCPv1; …` TXT record on
+`iyongbudiarso.com`. That proves who published the entry; it is not a statement that the code is
+safe. Check the [trust model](#trust-model) and the source instead.
 
 ### From source
 
@@ -234,6 +263,28 @@ runs the tests, builds all platforms, attests their provenance and publishes the
 with `SHA256SUMS`. Running the workflow manually (Actions > Release > Run workflow) only builds,
 which is a handy dry run.
 
+A second job then assembles the `.mcpb` bundles from those archives with the pinned
+`@anthropic-ai/mcpb` CLI, smoke-tests the macOS one, attests each bundle and attaches the bundles
+plus `SHA256SUMS.mcpb` and a generated `server.json` to the same release.
+
+### Publishing to the MCP Registry
+
+This is a manual step on purpose: it needs an Ed25519 key that must not live in the repository or
+in CI. `scripts/publish-registry.sh` downloads the released bundles, re-checks every hash against
+`server.json` and publishes:
+
+```sh
+brew install mcp-publisher          # the registry's CLI, once
+scripts/publish-registry.sh v0.2.0
+```
+
+The first time, and after a key rotation, the script's header explains how to generate the key,
+put the public half in a TXT record on the apex domain and run `mcp-publisher login dns`.
+
+Two things to know: a published version is immutable, so bump the version rather than rebuilding a
+tag; and rebuilding a tag produces different bundle bytes (ZIP timestamps), so publish the registry
+entry after the release workflow has run and do not re-run the workflow for a published tag.
+
 ## Development
 
 ```sh
@@ -253,6 +304,21 @@ MONEYLOVER_LIVE_WRITE=1 MONEYLOVER_LIVE_CATEGORY="<an expense category in that w
 ```
 
 Delete the test transaction in the Money Lover app afterwards.
+
+### Static analysis of the agent-facing surface
+
+[`snyk-agent-scan`](https://github.com/snyk/agent-scan) looks at what an AI client actually sees —
+tool descriptions, prompt-injection surface, hardcoded secrets. It is not part of CI because it
+needs a Snyk token and uploads tool names and descriptions to `api.snyk.io`, so run it by hand
+when you want it:
+
+```sh
+SNYK_TOKEN=… uvx snyk-agent-scan@0.6.8 scan --ci \
+  --dangerously-run-mcp-servers --suppress-mcpserver-io=true mcp.json
+```
+
+Generate `mcp.json` from your normal client config (it is the usual `{"mcpServers": {…}}` shape)
+and do not commit it if it contains credentials.
 
 ## License
 
