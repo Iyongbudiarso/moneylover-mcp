@@ -46,7 +46,35 @@ Design choices that matter for LLM use:
 
 ## Install
 
-You need a [Rust toolchain](https://rustup.rs).
+### Prebuilt binary (no Rust needed)
+
+Download the archive for your platform from the
+[latest release](https://github.com/Iyongbudiarso/moneylover-mcp/releases/latest):
+
+| Platform | Archive |
+|---|---|
+| macOS, Apple Silicon | `moneylover-mcp-<version>-aarch64-apple-darwin.tar.gz` |
+| macOS, Intel | `moneylover-mcp-<version>-x86_64-apple-darwin.tar.gz` |
+| Linux x86_64 (glibc 2.35+) | `moneylover-mcp-<version>-x86_64-unknown-linux-gnu.tar.gz` |
+| Linux ARM64 (glibc 2.35+) | `moneylover-mcp-<version>-aarch64-unknown-linux-gnu.tar.gz` |
+| Windows x86_64 | `moneylover-mcp-<version>-x86_64-pc-windows-msvc.zip` |
+
+Verify it before running it. `SHA256SUMS` is attached to every release, and every archive has a
+signed build-provenance attestation proving it was built by this repository's release workflow:
+
+```sh
+shasum -a 256 -c SHA256SUMS --ignore-missing          # Linux: sha256sum --check --ignore-missing SHA256SUMS
+gh attestation verify moneylover-mcp-*.tar.gz --repo Iyongbudiarso/moneylover-mcp
+```
+
+Extract it and put `moneylover-mcp` somewhere on your `PATH`. The binaries are not signed with an
+Apple or Microsoft certificate. On macOS, a file downloaded with a browser is blocked by
+Gatekeeper; after verifying it, allow it with `xattr -d com.apple.quarantine moneylover-mcp`.
+On Windows, SmartScreen may ask for confirmation.
+
+### From source
+
+You need a [Rust toolchain](https://rustup.rs) (1.89 or newer).
 
 ```sh
 cargo install --locked --git https://github.com/Iyongbudiarso/moneylover-mcp
@@ -54,10 +82,12 @@ cargo install --locked --git https://github.com/Iyongbudiarso/moneylover-mcp
 cargo build --locked --release   # binary: target/release/moneylover-mcp
 ```
 
-`--locked` builds with the exact dependency versions in `Cargo.lock`, which were audited
-(`cargo audit`), instead of whatever is newest on crates.io.
+`--locked` builds with the exact dependency versions in `Cargo.lock`, which CI audits with
+`cargo audit`, instead of whatever is newest on crates.io.
 
-Then log in **once, from a terminal**. The password is typed at a hidden prompt and never stored;
+### Log in
+
+Log in **once, from a terminal**. The password is typed at a hidden prompt and never stored;
 only the resulting token is saved:
 
 ```sh
@@ -179,6 +209,16 @@ What you should know:
   they contain no financial data. `MONEYLOVER_LOG=rmcp=debug` logs full tool inputs and outputs.
 - **Your AI provider** sees whatever the tools return (balances, transactions). That is inherent
   to using a cloud AI with your financial data.
+
+## Releasing
+
+1. Bump `version` in `Cargo.toml`, run `cargo build` to update `Cargo.lock`, commit.
+2. Tag and push: `git tag v0.2.0 && git push origin v0.2.0`.
+
+The [release workflow](.github/workflows/release.yml) checks that the tag matches `Cargo.toml`,
+runs the tests, builds all platforms, attests their provenance and publishes the GitHub release
+with `SHA256SUMS`. Running the workflow manually (Actions > Release > Run workflow) only builds,
+which is a handy dry run.
 
 ## Development
 
