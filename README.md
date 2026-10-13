@@ -46,7 +46,7 @@ Design choices that matter for LLM use:
 You need a [Rust toolchain](https://rustup.rs).
 
 ```sh
-cargo install --locked --git https://github.com/<you>/moneylover-mcp
+cargo install --locked --git https://github.com/Iyongbudiarso/moneylover-mcp
 # or, from a checkout:
 cargo build --locked --release   # binary: target/release/moneylover-mcp
 ```

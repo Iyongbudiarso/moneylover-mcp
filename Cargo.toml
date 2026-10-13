@@ -6,6 +6,7 @@ edition = "2024"
 rust-version = "1.89"
 description = "Unofficial MCP server for the Money Lover personal finance app (stdio)"
 license = "MIT"
+repository = "https://github.com/Iyongbudiarso/moneylover-mcp"
 readme = "README.md"
 keywords = ["mcp", "moneylover", "finance"]
 publish = false
