@@ -1,0 +1,6 @@
+/target
+token.json
+.env
+.env.*
+token.lock
+*.revoked
