@@ -4,6 +4,7 @@
 [![Security audit](https://github.com/Iyongbudiarso/moneylover-mcp/actions/workflows/audit.yml/badge.svg)](https://github.com/Iyongbudiarso/moneylover-mcp/actions/workflows/audit.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Iyongbudiarso/moneylover-mcp/badge)](https://scorecard.dev/viewer/?uri=github.com/Iyongbudiarso/moneylover-mcp)
 [![MCP Registry](https://img.shields.io/badge/MCP%20Registry-com.iyongbudiarso%2Fmoneylover--mcp-blue)](https://registry.modelcontextprotocol.io/v0.1/servers?search=com.iyongbudiarso/moneylover-mcp)
+[![Glama](https://glama.ai/mcp/servers/Iyongbudiarso/moneylover-mcp/badges/score.svg)](https://glama.ai/mcp/servers/Iyongbudiarso/moneylover-mcp)
 
 An [MCP](https://modelcontextprotocol.io) server that lets an AI agent or chatbot read your
 [Money Lover](https://moneylover.me) data and, if you allow it, add transactions. It talks to
