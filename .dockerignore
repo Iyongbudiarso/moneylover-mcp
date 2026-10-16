@@ -1,0 +1,10 @@
+target
+.git
+.github
+mcpb/out
+token.json
+token.lock
+*.revoked
+.env
+.env.*
+.DS_Store
