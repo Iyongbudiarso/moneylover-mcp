@@ -6,3 +6,6 @@ token.json
 token.lock
 *.revoked
 .DS_Store
+/fuzz/target
+/fuzz/corpus
+/fuzz/artifacts
