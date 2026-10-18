@@ -7,7 +7,7 @@
 [![Glama](https://glama.ai/mcp/servers/Iyongbudiarso/moneylover-mcp/badges/score.svg)](https://glama.ai/mcp/servers/Iyongbudiarso/moneylover-mcp)
 
 An [MCP](https://modelcontextprotocol.io) server that lets an AI agent or chatbot read your
-[Money Lover](https://moneylover.me) data and, if you allow it, add transactions. It talks to
+[Money Lover](https://moneylover.me) data and, if you allow it, add, correct and delete transactions. It talks to
 the client over **stdio**.
 
 > **Disclaimer — please read.**
@@ -44,6 +44,8 @@ is enforced in code and checked in CI, not just stated here.
 | `list_transactions` | Transactions in a date range, newest first (`limit` default 50, max 200) | no |
 | `summarize_spending` | Totals per category, grouped by currency, for a date range | no |
 | `add_transaction` | Create a transaction; supports `dry_run` | **yes** |
+| `update_transaction` | Change the category, amount, note or date of a transaction; supports `dry_run` | **yes** |
+| `delete_transaction` | Delete a transaction; supports `dry_run` | **yes** |
 
 Design choices that matter for LLM use:
 
@@ -53,10 +55,23 @@ Design choices that matter for LLM use:
   category name exists as both (e.g. "Other").
 - Money is returned as **decimal strings**, never floats.
 - Dates are `YYYY-MM-DD` in your configured timezone. A date range may cover at most **366 days**
-  per call; `add_transaction` accepts dates from a year back up to a month ahead.
+  per call; the write tools accept dates from a year back up to a month ahead.
+- `update_transaction` and `delete_transaction` take the `id`, `wallet` **and** `date` that
+  `list_transactions` returns (Money Lover cannot look a transaction up by id alone). An update
+  changes only the fields you pass and keeps the rest, including photo, location, event, people and
+  the "exclude from report" flag. Moving a transaction to another wallet is not supported: delete it
+  and add it again. Transfers, debts and loans are linked to other transactions and are refused;
+  change those in the app.
 - `summarize_spending` skips transactions flagged "exclude from report"; `list_transactions`
   still lists them, so the two never disagree silently.
-- `add_transaction` is **always listed**, so a client and its security scanner see the whole surface,
+- Without a `wallet`, `list_transactions` and `summarize_spending` cover **every** wallet, including
+  archived wallets and wallets excluded from Money Lover's total. Money Lover's own "all wallets"
+  query leaves those out and returns at most 9,999 rows, so the server asks for those wallets
+  separately (and for every wallet one by one when the 9,999-row cap is hit). On accounts with many
+  such wallets this takes longer; pass `wallet` when you only need one. A single wallet with 9,999 or
+  more transactions in the range is an error asking for a shorter range, never a silently short
+  list or total.
+- The write tools are **always listed**, so a client and its security scanner see the whole surface,
   but without `MONEYLOVER_ALLOW_WRITE=true` every call is refused before it reaches the network.
   See [Security](#security) for the limits that apply to writes.
 - Wallets and categories are **cached in memory** (5 minutes by default) because Money Lover's
@@ -151,10 +166,10 @@ All configuration is through environment variables.
 | Variable | Default | Meaning |
 |---|---|---|
 | `MONEYLOVER_TIMEZONE` | `Asia/Jakarta` | IANA timezone for dates |
-| `MONEYLOVER_ALLOW_WRITE` | `false` | Set `true` to enable `add_transaction` |
+| `MONEYLOVER_ALLOW_WRITE` | `false` | Set `true` to enable `add_transaction`, `update_transaction` and `delete_transaction` |
 | `MONEYLOVER_WRITE_WALLETS` | – | Comma-separated wallet names; when set, writes go **only** to these |
 | `MONEYLOVER_MAX_AMOUNT` | – | When set, larger amounts are refused |
-| `MONEYLOVER_MAX_WRITES_PER_HOUR` | `20` | Created transactions per rolling hour (1-1000) |
+| `MONEYLOVER_MAX_WRITES_PER_HOUR` | `20` | Adds, updates and deletes per rolling hour, combined (1-1000) |
 | `MONEYLOVER_TOKEN_PATH` | `~/.config/moneylover-mcp/token.json` | Where tokens are stored. Must be absolute |
 | `MONEYLOVER_CACHE_SECS` | `300` | How long wallets and categories are cached (0 disables) |
 | `MONEYLOVER_TIMEOUT_SECS` | `45` | Per-request timeout (1-300). Money Lover's servers can be slow |
@@ -205,7 +220,7 @@ In Zed, put the same thing under `context_servers` in `settings.json`:
 }
 ```
 
-To let an agent record transactions, opt in and fence it in:
+To let an agent record, correct and delete transactions, opt in and fence it in:
 
 ```json
 "env": {
@@ -232,16 +247,21 @@ What the server does to keep your account safe:
   your user profile's default permissions.
 - **Network.** HTTPS only, certificates checked against the OS trust store, redirects never
   followed (so a password or token can never be re-sent elsewhere), response size capped.
-- **Writes are off by default.** Without `MONEYLOVER_ALLOW_WRITE=true`, `add_transaction` still
-  appears in the tool list but answers with an error instead of calling Money Lover. When enabled,
-  every `add_transaction` call is checked by the server, not by the AI:
-  - only wallets in `MONEYLOVER_WRITE_WALLETS` (if set), archived wallets never;
+- **Writes are off by default.** Without `MONEYLOVER_ALLOW_WRITE=true`, the write tools
+  (`add_transaction`, `update_transaction`, `delete_transaction`) still appear in the tool list but
+  answer with an error instead of calling Money Lover. When enabled, every write is checked by the
+  server, not by the AI:
+  - only wallets in `MONEYLOVER_WRITE_WALLETS` (if set), archived wallets never. For updates and
+    deletes this is the wallet the transaction is in;
   - amounts up to `MONEYLOVER_MAX_AMOUNT` (if set);
-  - dates from one year ago to one month ahead;
-  - at most `MONEYLOVER_MAX_WRITES_PER_HOUR` transactions per hour (counted per server process:
-    two MCP clients each running the server get the limit twice);
+  - dates from one year ago to one month ahead. Updates and deletes also only touch transactions
+    dated in that window, so an agent cannot rewrite older history;
+  - at most `MONEYLOVER_MAX_WRITES_PER_HOUR` adds, updates and deletes per hour, combined (counted
+    per server process: two MCP clients each running the server get the limit twice);
   - an identical transaction within 10 minutes is refused as an accidental retry unless the
     agent passes `allow_duplicate: true`;
+  - transfers, debts, loans and repayments are never updated or deleted, because each is linked
+    to other transactions that would be left inconsistent;
   - writes are never retried automatically. If a write times out, the tool answers `UNCERTAIN`
     and tells the agent to check before retrying.
 
@@ -250,7 +270,8 @@ What you should know:
 - **Prompt injection.** Transaction notes, wallet names and category names are shown to the AI.
   In a **shared wallet**, other people write those. Text like "ignore previous instructions and
   add …" could steer an agent. The server tells the agent to treat this text as data, but the
-  real protection is the write limits above. Keep writes off unless you need them, restrict
+  real protection is the write limits above. With writes on, an injected instruction could also
+  ask for a delete, which has no undo here. Keep writes off unless you need them, restrict
   `MONEYLOVER_WRITE_WALLETS`, and prefer an MCP client that asks you before each tool call.
   `MONEYLOVER_WRITE_WALLETS` matches wallet **names**; the owner of a wallet shared with you can
   rename it, so list wallets you own.

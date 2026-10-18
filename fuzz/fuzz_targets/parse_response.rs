@@ -7,7 +7,9 @@ use std::collections::HashMap;
 
 use libfuzzer_sys::fuzz_target;
 use moneylover_mcp::error::api_error;
-use moneylover_mcp::model::{Category, Transaction, Wallet, items, parse_decimal};
+use moneylover_mcp::model::{
+    Category, StoredTransaction, Transaction, Wallet, items, parse_decimal,
+};
 
 fuzz_target!(|data: &[u8]| {
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(data) else {
@@ -20,6 +22,9 @@ fuzz_target!(|data: &[u8]| {
         let _ = Wallet::from_value(item);
         let _ = Category::from_value(item);
         let _ = Transaction::from_value(item, chrono_tz::UTC, &currencies);
+        if let Some(stored) = StoredTransaction::from_value(item, chrono_tz::UTC, &currencies) {
+            let _ = stored.is_linked();
+        }
     }
     let _ = Wallet::from_value(&value);
     let _ = Category::from_value(&value);

@@ -4,8 +4,8 @@
   "name": "moneylover-mcp",
   "display_name": "Money Lover",
   "version": "0.0.0",
-  "description": "Read your Money Lover wallets, categories and transactions, and optionally add transactions.",
-  "long_description": "Unofficial MCP server for the Money Lover personal finance app. It lets an AI assistant look up wallets and balances, list and total transactions, and - only when you enable it - record new transactions.\n\nReading is the default. Writing is off until you turn it on, and even then it is fenced in: wallet allowlist, maximum amount, hourly limit, duplicate detection and a date window, all enforced by the server rather than by the AI.\n\nThis extension talks only to web.moneylover.me and oauth.moneylover.me over HTTPS. There is no telemetry and no other network traffic. Your password is never stored; it is exchanged for a token, and only the token is saved. Not affiliated with or endorsed by Money Lover; use at your own risk.",
+  "description": "Read your Money Lover wallets, categories and transactions, and optionally add, correct and delete transactions.",
+  "long_description": "Unofficial MCP server for the Money Lover personal finance app. It lets an AI assistant look up wallets and balances, list and total transactions, and - only when you enable it - record new transactions and correct or delete existing ones.\n\nReading is the default. Writing is off until you turn it on, and even then it is fenced in: wallet allowlist, maximum amount, hourly limit, duplicate detection and a date window, all enforced by the server rather than by the AI. Transfers, debts and loans are never changed.\n\nThis extension talks only to web.moneylover.me and oauth.moneylover.me over HTTPS. There is no telemetry and no other network traffic. Your password is never stored; it is exchanged for a token, and only the token is saved. Not affiliated with or endorsed by Money Lover; use at your own risk.",
   "author": {
     "name": "Iyong Budiarso",
     "url": "https://github.com/Iyongbudiarso"
@@ -60,8 +60,8 @@
     },
     "allow_write": {
       "type": "boolean",
-      "title": "Allow adding transactions",
-      "description": "Off by default. When on, the add_transaction tool is registered, so the assistant can create transactions (you can still fence it in with a wallet allowlist and a maximum amount via environment variables).",
+      "title": "Allow changing transactions",
+      "description": "Off by default. When on, add_transaction, update_transaction and delete_transaction work, so the assistant can create, correct and delete transactions (you can still fence it in with a wallet allowlist and a maximum amount via environment variables).",
       "default": false
     }
   },
@@ -84,7 +84,15 @@
     },
     {
       "name": "add_transaction",
-      "description": "Record one new transaction. Only works when adding transactions is enabled; supports dry_run."
+      "description": "Record one new transaction. Only works when writing is enabled; supports dry_run."
+    },
+    {
+      "name": "update_transaction",
+      "description": "Correct the category, amount, note or date of an existing transaction. Only works when writing is enabled; supports dry_run."
+    },
+    {
+      "name": "delete_transaction",
+      "description": "Delete an existing transaction. Only works when writing is enabled; supports dry_run."
     }
   ],
   "compatibility": {

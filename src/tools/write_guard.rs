@@ -4,7 +4,7 @@
 
 use std::{
     collections::VecDeque,
-    sync::Mutex,
+    sync::{Mutex, MutexGuard},
     time::{Duration, Instant},
 };
 
@@ -36,7 +36,8 @@ pub struct Fingerprint {
 
 struct Recorded {
     at: Instant,
-    fingerprint: Fingerprint,
+    /// `None` for an update or delete, which only counts towards the hourly limit.
+    fingerprint: Option<Fingerprint>,
 }
 
 pub struct WriteGuard {
@@ -83,16 +84,10 @@ impl WriteGuard {
     /// Records the write before it is sent, so that even a write whose outcome is
     /// unknown (timeout) counts towards the limit and blocks an identical retry.
     pub fn admit(&self, fingerprint: Fingerprint, allow_duplicate: bool) -> Result<()> {
-        let mut recent = self
-            .recent
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        while recent.front().is_some_and(|r| r.at.elapsed() > RATE_WINDOW) {
-            recent.pop_front();
-        }
-        let is_duplicate = recent
-            .iter()
-            .any(|r| r.fingerprint == fingerprint && r.at.elapsed() < DUPLICATE_WINDOW);
+        let mut recent = self.recent();
+        let is_duplicate = recent.iter().any(|r| {
+            r.fingerprint.as_ref() == Some(&fingerprint) && r.at.elapsed() < DUPLICATE_WINDOW
+        });
         if is_duplicate && !allow_duplicate {
             return Err(refused(format!(
                 "an identical transaction was sent less than {} minutes ago, so this looks like an accidental retry. \
@@ -100,9 +95,54 @@ impl WriteGuard {
                 DUPLICATE_WINDOW.as_secs() / 60
             )));
         }
+        self.record(&mut recent, Some(fingerprint))
+    }
+
+    /// Admits an update or delete. Repeating one changes nothing further, so only
+    /// the hourly limit applies.
+    pub fn admit_change(&self) -> Result<()> {
+        let mut recent = self.recent();
+        self.record(&mut recent, None)
+    }
+
+    /// Undoes `admit` for a write that certainly did not happen, so a corrected
+    /// retry is neither refused as a duplicate nor counted against the limit.
+    pub fn forget(&self, fingerprint: &Fingerprint) {
+        self.forget_where(|r| r.fingerprint.as_ref() == Some(fingerprint));
+    }
+
+    /// Undoes `admit_change` for an update or delete that certainly did not happen.
+    pub fn forget_change(&self) {
+        self.forget_where(|r| r.fingerprint.is_none());
+    }
+
+    fn forget_where(&self, matches: impl Fn(&Recorded) -> bool) {
+        let mut recent = self.recent();
+        if let Some(index) = recent.iter().rposition(matches) {
+            recent.remove(index);
+        }
+    }
+
+    /// The writes of the last hour, oldest first.
+    fn recent(&self) -> MutexGuard<'_, VecDeque<Recorded>> {
+        let mut recent = self
+            .recent
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        while recent.front().is_some_and(|r| r.at.elapsed() > RATE_WINDOW) {
+            recent.pop_front();
+        }
+        recent
+    }
+
+    fn record(
+        &self,
+        recent: &mut VecDeque<Recorded>,
+        fingerprint: Option<Fingerprint>,
+    ) -> Result<()> {
         if recent.len() >= self.max_per_hour {
             return Err(refused(format!(
-                "write limit reached: at most {} transactions per hour (MONEYLOVER_MAX_WRITES_PER_HOUR)",
+                "write limit reached: at most {} writes (adds, updates and deletes) per hour (MONEYLOVER_MAX_WRITES_PER_HOUR)",
                 self.max_per_hour
             )));
         }
@@ -111,18 +151,6 @@ impl WriteGuard {
             fingerprint,
         });
         Ok(())
-    }
-
-    /// Undoes `admit` for a write that certainly did not happen, so a corrected
-    /// retry is neither refused as a duplicate nor counted against the limit.
-    pub fn forget(&self, fingerprint: &Fingerprint) {
-        let mut recent = self
-            .recent
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some(index) = recent.iter().rposition(|r| &r.fingerprint == fingerprint) {
-            recent.remove(index);
-        }
     }
 }
 
@@ -200,6 +228,22 @@ mod tests {
         g.admit(fingerprint("2"), false).unwrap();
         let err = g.admit(fingerprint("3"), false).unwrap_err().to_string();
         assert!(err.contains("write limit"), "{err}");
+    }
+
+    #[test]
+    fn updates_and_deletes_share_the_hourly_limit() {
+        let g = guard(2);
+        g.admit(fingerprint("1"), false).unwrap();
+        g.admit_change().unwrap();
+        let err = g.admit_change().unwrap_err().to_string();
+        assert!(err.contains("write limit"), "{err}");
+        g.forget_change();
+        g.admit_change().unwrap();
+        // Forgetting a change never frees the slot of an add.
+        g.forget_change();
+        g.forget_change();
+        g.admit(fingerprint("2"), false).unwrap();
+        assert!(g.admit_change().is_err());
     }
 
     #[test]

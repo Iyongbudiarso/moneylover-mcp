@@ -4,7 +4,8 @@
 //!   cargo test --test live -- --ignored --nocapture --test-threads=1
 //!
 //! The read test never writes. The write test additionally needs
-//! `MONEYLOVER_LIVE_WRITE=1` and only ever touches a wallet named "MCP Test".
+//! `MONEYLOVER_LIVE_WRITE=1` and only ever touches a wallet named "MCP Test":
+//! it adds a transaction, edits it, then deletes it.
 //! Output deliberately contains counts and field names only, never amounts or notes.
 
 use chrono::{Duration, Utc};
@@ -90,6 +91,22 @@ async fn live_read_only_smoke_test() {
             .filter(|t| t.kind != moneylover_mcp::model::Kind::Unknown)
             .count()
     );
+
+    // Every wallet, archived and excluded-from-total ones too, must be in the combined list.
+    let mut per_wallet = 0;
+    for w in wallets.iter() {
+        per_wallet += ml
+            .transactions(Some(&w.id), today - Duration::days(30), today, &wallets)
+            .await
+            .expect("transactions per wallet")
+            .len();
+    }
+    println!("  sum over wallets one by one: {per_wallet}");
+    assert_eq!(
+        txs.len(),
+        per_wallet,
+        "the all-wallets list misses some wallets"
+    );
 }
 
 #[tokio::test]
@@ -122,16 +139,29 @@ async fn live_write_to_mcp_test_wallet() {
         txs.iter().filter(|t| t.note.contains(marker)).count()
     };
 
-    // An earlier attempt that timed out may still have been saved. Never add a duplicate.
+    // An earlier run that failed or timed out may have left its transaction behind.
+    // Remove it first (only marked transactions in 'MCP Test'), never add a duplicate.
+    let leftovers = ml
+        .transactions(Some(&wallet.id), today, today, &wallets)
+        .await
+        .expect("transactions");
+    println!(
+        "test transactions left over in 'MCP Test' today: {}",
+        count_marked(&leftovers)
+    );
+    for t in leftovers.iter().filter(|t| t.note.contains(marker)) {
+        ml.delete_transaction(&t.id)
+            .await
+            .expect("delete leftover test transaction");
+    }
     let before = ml
         .transactions(Some(&wallet.id), today, today, &wallets)
         .await
         .expect("transactions");
-    let existing = count_marked(&before);
-    println!("test transactions already in 'MCP Test' today: {existing}");
     assert_eq!(
-        existing, 0,
-        "a test transaction already exists in 'MCP Test'; delete it in the app and rerun"
+        count_marked(&before),
+        0,
+        "a leftover test transaction could not be deleted; delete it in the app and rerun"
     );
 
     let started = std::time::Instant::now();
@@ -164,12 +194,54 @@ async fn live_write_to_mcp_test_wallet() {
     if result.is_err() && saved > 0 {
         println!("NOTE: the write reported an error but the transaction WAS saved");
     }
-    if saved > 0 {
-        println!("now delete it in the Money Lover app");
-    }
     result.expect("add_transaction");
     assert_eq!(
         saved, 1,
         "the new transaction was not found when listing the wallet"
     );
+
+    // Edit the note, then delete the transaction, so the test cleans up after itself.
+    let id = after
+        .iter()
+        .find(|t| t.note.contains(marker))
+        .map(|t| t.id.clone())
+        .unwrap();
+    let stored = ml
+        .transaction_by_id(&id, &wallet.id, today, &wallets)
+        .await
+        .expect("transaction_by_id")
+        .expect("the new transaction is found by id");
+    ml.edit_transaction(
+        &stored,
+        &NewTransaction {
+            wallet_id: wallet.id.clone(),
+            category_id: category.id.clone(),
+            amount: Decimal::from(4321),
+            note: format!("{marker} - edited, safe to delete"),
+            date: today,
+        },
+    )
+    .await
+    .expect("edit_transaction");
+    let edited = ml
+        .transaction_by_id(&id, &wallet.id, today, &wallets)
+        .await
+        .expect("transaction_by_id")
+        .expect("the edited transaction still exists");
+    assert!(edited.transaction.note.contains("edited"));
+    assert_eq!(edited.transaction.amount, Decimal::from(4321));
+    println!("edit_transaction ok");
+
+    ml.delete_transaction(&id)
+        .await
+        .expect("delete_transaction");
+    let gone = ml
+        .transaction_by_id(&id, &wallet.id, today, &wallets)
+        .await
+        .expect("transaction_by_id");
+    assert!(
+        gone.is_none(),
+        "the transaction is still listed after delete"
+    );
+    println!("delete_transaction ok");
 }
