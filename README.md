@@ -261,7 +261,7 @@ What you should know:
 ## Releasing
 
 1. Bump `version` in `Cargo.toml`, run `cargo build` to update `Cargo.lock`, commit.
-2. Tag and push: `git tag v0.3.0 && git push origin v0.3.0`.
+2. Tag and push: `git tag v0.3.1 && git push origin v0.3.1`.
 
 The [release workflow](.github/workflows/release.yml) checks that the tag matches `Cargo.toml`,
 runs the tests, builds all platforms, attests their provenance and publishes the GitHub release
@@ -280,7 +280,7 @@ in CI. `scripts/publish-registry.sh` downloads the released bundles, re-checks e
 
 ```sh
 brew install mcp-publisher          # the registry's CLI, once
-scripts/publish-registry.sh v0.3.0
+scripts/publish-registry.sh v0.3.1
 ```
 
 The first time, and after a key rotation, the script's header explains how to generate the key,

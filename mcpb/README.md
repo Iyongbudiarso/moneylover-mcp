@@ -14,8 +14,8 @@ To try it by hand, download the archives of a release into `dist/` (the script n
 per-target archives, not a bare binary, and it uses `lipo`, so it runs on macOS):
 
 ```sh
-gh release download v0.3.0 --pattern 'moneylover-mcp-v0.3.0-*' --dir dist
-DIST_DIR=dist OUT_DIR=/tmp/out scripts/build-mcpb.sh v0.3.0
+gh release download v0.3.1 --pattern 'moneylover-mcp-v0.3.1-*' --dir dist
+DIST_DIR=dist OUT_DIR=/tmp/out scripts/build-mcpb.sh v0.3.1
 ```
 
 Publishing the results to the MCP Registry is a separate, manual step; see
