@@ -8,15 +8,16 @@ use crate::model::{Kind, Transaction, TxType, Wallet, fmt_money};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ListWalletsInput {
-    /// Bypass the cache and fetch live balances (slow on large accounts).
+    /// Set to true to bypass the short-lived cache and fetch live balances. Slow on large accounts,
+    /// so leave it unset (default false) unless the user explicitly needs a live figure.
     pub refresh: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ListCategoriesInput {
-    /// Wallet name. Omit for the account-wide category list.
+    /// Wallet name, exactly as returned by list_wallets (case-insensitive). Omit for the account-wide category list.
     pub wallet: Option<String>,
-    /// Only return categories of this type.
+    /// Filter by category type: "income" or "expense". Omit to return both.
     #[serde(rename = "type")]
     pub kind: Option<TxType>,
 }
@@ -33,11 +34,12 @@ impl ListCategoriesInput {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ListTransactionsInput {
-    /// First day, inclusive, as YYYY-MM-DD.
+    /// First day of the range, inclusive, as YYYY-MM-DD in the user's timezone, e.g. "2026-04-01".
     pub start_date: String,
-    /// Last day, inclusive, as YYYY-MM-DD.
+    /// Last day of the range, inclusive, as YYYY-MM-DD. Must not be before start_date; the whole
+    /// range may span at most 366 days.
     pub end_date: String,
-    /// Wallet name. Omit for all wallets.
+    /// Wallet name, exactly as returned by list_wallets. Omit for all wallets.
     pub wallet: Option<String>,
     /// Only transactions in the category with this exact name (case-insensitive).
     pub category: Option<String>,
@@ -47,13 +49,14 @@ pub struct ListTransactionsInput {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SummarizeInput {
-    /// First day, inclusive, as YYYY-MM-DD.
+    /// First day of the range, inclusive, as YYYY-MM-DD in the user's timezone, e.g. "2026-04-01".
     pub start_date: String,
-    /// Last day, inclusive, as YYYY-MM-DD.
+    /// Last day of the range, inclusive, as YYYY-MM-DD. Must not be before start_date; the whole
+    /// range may span at most 366 days.
     pub end_date: String,
-    /// Wallet name. Omit for all wallets.
+    /// Wallet name, exactly as returned by list_wallets. Omit to total across all wallets.
     pub wallet: Option<String>,
-    /// Which side to total. Defaults to expense.
+    /// Which side to total: "expense" (spending) or "income" (earnings). Defaults to "expense".
     #[serde(rename = "type")]
     pub kind: Option<TxType>,
 }
@@ -78,7 +81,8 @@ pub struct AddTransactionInput {
     pub note: Option<String>,
     /// Transaction date as YYYY-MM-DD. Defaults to today in the user's timezone.
     pub date: Option<String>,
-    /// Only needed when the category name exists as both income and expense.
+    /// "income" or "expense". Only needed when the category name exists as both; otherwise it is
+    /// taken from the category.
     #[serde(rename = "type")]
     pub kind: Option<TxType>,
     /// If true, validate and resolve everything but do not create the transaction.
