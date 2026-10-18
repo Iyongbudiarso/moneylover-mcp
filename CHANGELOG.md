@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased
+
+Transactions can now be corrected and deleted, not only added, so a mistake no longer has to be
+fixed in the Money Lover app.
+
+- `update_transaction` changes the category, amount, note or date of an existing transaction. Fields
+  that are left out keep their value, and so do the photo, location, event, people and the
+  "exclude from report" flag.
+- `delete_transaction` deletes one transaction.
+- Both take the `id`, `wallet` and `date` returned by `list_transactions`, support `dry_run`, and need
+  `MONEYLOVER_ALLOW_WRITE=true`. The existing write limits apply to them: wallet allowlist, maximum
+  amount, date window (for the transaction's current date as well as a new one) and the hourly
+  limit. Transfers, debts, loans and repayments are refused, because changing one half would leave
+  the linked transactions inconsistent.
+
+Behaviour change: `MONEYLOVER_MAX_WRITES_PER_HOUR` now counts adds, updates and deletes together,
+where it previously counted only added transactions.
+
+### Fixed
+
+- `list_transactions` and `summarize_spending` without a `wallet` silently left out every wallet
+  excluded from Money Lover's total (and archived wallets), although they were documented as
+  covering all wallets. On the account this was found on, that was 145 of 293 transactions in
+  30 days. Those wallets are now fetched separately, so totals can go up after upgrading. This is
+  slower on accounts with many such wallets; pass `wallet` to query only one.
+- Money Lover returns at most 9,999 transactions per request and drops the rest without saying so.
+  When the all-wallets request hits that cap the server now asks each wallet separately, and a
+  single wallet at the cap is an error asking for a shorter range instead of an incomplete answer.
+
 ## 0.3.2
 
 Tool descriptions rewritten against Glama's Tool Definition Quality Score (TDQS) rubric, which

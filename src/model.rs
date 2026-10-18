@@ -101,6 +101,16 @@ pub struct Transaction {
     pub exclude_report: bool,
 }
 
+/// A transaction together with the JSON it came from. Money Lover's edit replaces
+/// the whole transaction, so the fields this server does not manage (photo,
+/// location, event, "with", ...) must be sent back exactly as they were.
+#[derive(Debug, Clone)]
+pub struct StoredTransaction {
+    pub transaction: Transaction,
+    pub category_id: Option<String>,
+    pub raw: Value,
+}
+
 fn str_field(v: &Value, key: &str) -> Option<String> {
     v.get(key)
         .and_then(Value::as_str)
@@ -258,6 +268,42 @@ impl Transaction {
     }
 }
 
+impl StoredTransaction {
+    pub fn from_value(
+        v: &Value,
+        tz: Tz,
+        wallet_currency: &HashMap<String, String>,
+    ) -> Option<Self> {
+        Some(Self {
+            transaction: Transaction::from_value(v, tz, wallet_currency)?,
+            category_id: v.get("category").and_then(id_of),
+            raw: v.clone(),
+        })
+    }
+
+    /// Transfers, debts, loans and their repayments are tied to other
+    /// transactions; changing one on its own would leave its counterpart wrong.
+    pub fn is_linked(&self) -> bool {
+        let is_set = |key: &str| match self.raw.get(key) {
+            Some(Value::Bool(b)) => *b,
+            Some(Value::String(s)) => !s.trim().is_empty(),
+            Some(Value::Array(a)) => !a.is_empty(),
+            Some(Value::Object(_)) => true,
+            _ => false,
+        };
+        let metadata = self
+            .raw
+            .get("category")
+            .and_then(|c| str_field(c, "metadata"));
+        is_set("related")
+            || is_set("parent")
+            || matches!(
+                metadata.as_deref(),
+                Some("IS_DEBT" | "IS_LOAN" | "IS_DEBT_COLLECTION" | "IS_REPAYMENT")
+            )
+    }
+}
+
 /// Returns the calendar date (in `tz`) and a sort key. A timestamp is converted to
 /// the configured timezone; a bare `YYYY-MM-DD` is already a calendar date.
 pub fn parse_date(s: &str, tz: Tz) -> Option<(NaiveDate, i64)> {
@@ -352,6 +398,31 @@ mod tests {
                 &none
             )
             .is_none()
+        );
+    }
+
+    #[test]
+    fn linked_transactions_are_recognised() {
+        let none = HashMap::new();
+        let stored = |extra: Value| {
+            let mut v = json!({
+                "_id": "t", "amount": 1, "displayDate": "2026-04-18",
+                "category": {"_id": "c1", "name": "Food", "type": 2}
+            });
+            for (key, value) in extra.as_object().unwrap() {
+                v[key] = value.clone();
+            }
+            StoredTransaction::from_value(&v, chrono_tz::UTC, &none).unwrap()
+        };
+        let plain = stored(json!({"related": "", "parent": null}));
+        assert!(!plain.is_linked());
+        assert_eq!(plain.category_id.as_deref(), Some("c1"));
+        assert!(stored(json!({"related": "t2"})).is_linked());
+        assert!(stored(json!({"related": true})).is_linked());
+        assert!(stored(json!({"parent": {"_id": "t0"}})).is_linked());
+        assert!(
+            stored(json!({"category": {"_id": "c9", "name": "Loan", "metadata": "IS_LOAN"}}))
+                .is_linked()
         );
     }
 

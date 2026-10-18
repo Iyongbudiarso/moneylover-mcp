@@ -29,7 +29,7 @@ pub struct Config {
     pub request_timeout: Duration,
     /// How long wallets and categories are kept in memory. Zero disables the cache.
     pub cache_ttl: Duration,
-    /// Upper bound on created transactions per rolling hour (runaway-agent guard).
+    /// Upper bound on adds, updates and deletes per rolling hour (runaway-agent guard).
     pub max_writes_per_hour: usize,
     /// When set, writes are only allowed into these wallets (normalized names).
     pub write_wallets: Option<Vec<String>>,
