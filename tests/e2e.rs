@@ -243,7 +243,10 @@ async fn lists_categories_for_wallet_with_hierarchy_and_type_filter() {
     assert_eq!(names, ["Cash only", "Food", "Food > Lunch", "Other"]);
 
     let result = call(&client, "list_categories", json!({"wallet": "MCP Test"})).await;
-    let names: Vec<String> = structured(&result)["categories"]
+    let out = structured(&result);
+    assert_eq!(out["kind"], "both income and expense");
+    assert_eq!(out["wallet"], "MCP Test");
+    let names: Vec<String> = out["categories"]
         .as_array()
         .unwrap()
         .iter()
@@ -261,6 +264,9 @@ async fn lists_categories_for_wallet_with_hierarchy_and_type_filter() {
         .map(|c| c["full_name"].as_str().unwrap().to_string())
         .collect();
     assert_eq!(names, ["Other", "Salary"]);
+    let out = structured(&result);
+    assert_eq!(out["kind"], "income only");
+    assert!(out["wallet"].is_null());
 }
 
 fn transactions_fixture() -> Value {

@@ -68,23 +68,23 @@
   "tools": [
     {
       "name": "list_wallets",
-      "description": "List all Money Lover wallets with their currency and balance."
+      "description": "List every wallet with its currency and balance, to resolve wallet names for the other tools."
     },
     {
       "name": "list_categories",
-      "description": "List income and expense categories, optionally for one wallet."
+      "description": "List income and expense categories, account-wide or for one wallet, to resolve category names."
     },
     {
       "name": "list_transactions",
-      "description": "List transactions in a date range, newest first."
+      "description": "List individual transactions in a date range, most recent first."
     },
     {
       "name": "summarize_spending",
-      "description": "Total income or expenses per category and currency for a date range."
+      "description": "Total income or expenses per category, grouped by currency, for a date range."
     },
     {
       "name": "add_transaction",
-      "description": "Create a transaction. Only registered when adding transactions is enabled. Supports dry_run."
+      "description": "Record one new transaction. Only works when adding transactions is enabled; supports dry_run."
     }
   ],
   "compatibility": {
