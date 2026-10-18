@@ -9,6 +9,12 @@ updates:
         patterns: ["*"]
     open-pull-requests-limit: 5
 
+  # Keeps the digest-pinned base images up to date.
+  - package-ecosystem: docker
+    directories: [/, /.clusterfuzzlite]
+    schedule:
+      interval: weekly
+
   # Keeps the SHA-pinned actions in .github/workflows up to date.
   - package-ecosystem: github-actions
     directory: /

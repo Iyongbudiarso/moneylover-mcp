@@ -1,0 +1,37 @@
+name: ClusterFuzzLite
+
+# Short fuzzing session on every pull request, so parser changes are fuzzed before
+# they merge. The targets live in fuzz/ (cargo-fuzz); the build image is in .clusterfuzzlite/.
+on:
+  pull_request:
+    paths:
+      - src/**
+      - fuzz/**
+      - .clusterfuzzlite/**
+      - Cargo.toml
+      - Cargo.lock
+      - .github/workflows/fuzz.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pr:
+    name: fuzz (code change)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
+        with:
+          language: rust
+          sanitizer: address
+      - uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          fuzz-seconds: 120
+          mode: code-change
+          sanitizer: address
