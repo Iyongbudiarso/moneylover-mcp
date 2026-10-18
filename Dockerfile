@@ -13,6 +13,6 @@ RUN apt-get update \
 COPY --from=build /src/target/release/moneylover-mcp /usr/local/bin/moneylover-mcp
 USER moneylover
 # Speaks MCP over stdio. Run `moneylover-mcp login` to store a token, or pass
-# MONEYLOVER_EMAIL and MONEYLOVER_PASSWORD as secrets. Writes stay off unless
-# MONEYLOVER_ALLOW_WRITE=true.
+# MONEYLOVER_EMAIL and MONEYLOVER_PASSWORD as secrets. Writes are off unless the
+# container is started with MONEYLOVER_ALLOW_WRITE=true.
 ENTRYPOINT ["moneylover-mcp"]

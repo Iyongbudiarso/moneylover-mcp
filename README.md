@@ -28,7 +28,7 @@ is enforced in code and checked in CI, not just stated here.
 
 | Claim | How it is enforced |
 |---|---|
-| **The token is full-access; read-only is enforced by the server.** Money Lover has no scoped or read-only tokens. | Write tools are not even registered unless `MONEYLOVER_ALLOW_WRITE=true`; when they are, a server-side guard limits them ([Security](#security)). |
+| **The token is full-access; read-only is enforced by the server.** Money Lover has no scoped or read-only tokens. | Write tools are always listed but do nothing unless `MONEYLOVER_ALLOW_WRITE=true`; when they are enabled, a server-side guard limits them ([Security](#security)). |
 | **Network egress goes only to Money Lover**: `web.moneylover.me` and `oauth.moneylover.me`, HTTPS only. No telemetry, no update checks, no other hosts. | Endpoints are compile-time constants that no environment variable can change; redirects are never followed. [`tests/egress.rs`](tests/egress.rs) fails if any other URL appears in the source. |
 | **Credentials stay local.** The password is used for login and never stored; tokens live in a `0600` file; nothing secret is logged or returned to the AI. | [`src/token_store.rs`](src/token_store.rs), redacting `Debug` impls, tests. |
 | **Dependencies are pinned and vetted.** | `Cargo.lock` + `--locked` everywhere; [`cargo-deny`](deny.toml) allows crates.io sources and permissive licenses only and fails on RustSec advisories or yanked crates (weekly and on change); GitHub Actions pinned to commit SHAs; Dependabot. |
@@ -53,7 +53,8 @@ Design choices that matter for LLM use:
   category name exists as both (e.g. "Other").
 - Money is returned as **decimal strings**, never floats.
 - Dates are `YYYY-MM-DD` in your configured timezone.
-- `add_transaction` is **not even registered** unless you opt in with `MONEYLOVER_ALLOW_WRITE=true`.
+- `add_transaction` is **always listed**, so a client and its security scanner see the whole surface,
+  but without `MONEYLOVER_ALLOW_WRITE=true` every call is refused before it reaches the network.
   See [Security](#security) for the limits that apply to writes.
 - Wallets and categories are **cached in memory** (5 minutes by default) because Money Lover's
   wallet list can take 30+ seconds on large accounts. Writing a transaction clears the cached
@@ -228,8 +229,9 @@ What the server does to keep your account safe:
   your user profile's default permissions.
 - **Network.** HTTPS only, certificates checked against the OS trust store, redirects never
   followed (so a password or token can never be re-sent elsewhere), response size capped.
-- **Writes are off by default.** When enabled, every `add_transaction` call is checked by the
-  server, not by the AI:
+- **Writes are off by default.** Without `MONEYLOVER_ALLOW_WRITE=true`, `add_transaction` still
+  appears in the tool list but answers with an error instead of calling Money Lover. When enabled,
+  every `add_transaction` call is checked by the server, not by the AI:
   - only wallets in `MONEYLOVER_WRITE_WALLETS` (if set), archived wallets never;
   - amounts up to `MONEYLOVER_MAX_AMOUNT` (if set);
   - dates from one year ago to one month ahead;
@@ -259,7 +261,7 @@ What you should know:
 ## Releasing
 
 1. Bump `version` in `Cargo.toml`, run `cargo build` to update `Cargo.lock`, commit.
-2. Tag and push: `git tag v0.2.0 && git push origin v0.2.0`.
+2. Tag and push: `git tag v0.3.0 && git push origin v0.3.0`.
 
 The [release workflow](.github/workflows/release.yml) checks that the tag matches `Cargo.toml`,
 runs the tests, builds all platforms, attests their provenance and publishes the GitHub release
@@ -278,7 +280,7 @@ in CI. `scripts/publish-registry.sh` downloads the released bundles, re-checks e
 
 ```sh
 brew install mcp-publisher          # the registry's CLI, once
-scripts/publish-registry.sh v0.2.0
+scripts/publish-registry.sh v0.3.0
 ```
 
 The first time, and after a key rotation, the script's header explains how to generate the key,

@@ -163,9 +163,15 @@ fn structured(result: &CallToolResult) -> &Value {
 }
 
 #[tokio::test]
-async fn read_only_by_default_hides_add_transaction() {
+async fn add_transaction_stays_listed_but_refuses_when_read_only() {
     let h = Harness::new().await;
     h.seed_token("tok", "ref", FAR_FUTURE);
+    // Any request at all would be a bug: a read-only start must never reach the API.
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(500))
+        .expect(0)
+        .mount(&h.mock)
+        .await;
     let client = h.connect(h.config(false, false)).await;
     let names: Vec<String> = client
         .list_all_tools()
@@ -176,16 +182,22 @@ async fn read_only_by_default_hides_add_transaction() {
         .collect();
     assert!(names.contains(&"list_wallets".to_string()));
     assert!(names.contains(&"summarize_spending".to_string()));
-    assert!(!names.contains(&"add_transaction".to_string()), "{names:?}");
-    // Even called directly, the hidden tool must not work.
-    let direct = client
-        .call_tool(CallToolRequestParams::new("add_transaction").with_arguments(Default::default()))
-        .await;
-    assert!(direct.is_err() || direct.unwrap().is_error == Some(true));
+    // Listed, not hidden: a client (and a security scanner) sees the whole surface,
+    // and the server, not the client, is what enforces read-only.
+    assert!(names.contains(&"add_transaction".to_string()), "{names:?}");
+
+    let args = json!({"wallet": "MCP Test", "category": "Food", "amount": 5, "dry_run": true});
+    let result = call(&client, "add_transaction", args).await;
+    assert_eq!(result.is_error, Some(true));
+    assert!(
+        text_of(&result).contains("MONEYLOVER_ALLOW_WRITE"),
+        "{}",
+        text_of(&result)
+    );
 }
 
 #[tokio::test]
-async fn write_flag_registers_add_transaction() {
+async fn write_flag_enables_add_transaction() {
     let h = Harness::new().await;
     h.seed_token("tok", "ref", FAR_FUTURE);
     let client = h.connect(h.config(true, false)).await;
