@@ -14,6 +14,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// How Money Lover writes a calendar date, in requests and in responses.
+pub const API_DATE_FORMAT: &str = "%Y-%m-%d";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Kind {
@@ -311,7 +314,7 @@ pub fn parse_date(s: &str, tz: Tz) -> Option<(NaiveDate, i64)> {
     if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
         return Some((dt.with_timezone(&tz).date_naive(), dt.timestamp()));
     }
-    let d = NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()?;
+    let d = NaiveDate::parse_from_str(s, API_DATE_FORMAT).ok()?;
     Some((d, d.and_hms_opt(0, 0, 0)?.and_utc().timestamp()))
 }
 

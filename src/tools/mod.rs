@@ -8,12 +8,14 @@ mod write_guard;
 
 use std::sync::Arc;
 
+use chrono::NaiveDate;
 use rmcp::{
     Json, RoleServer, ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     service::RequestContext,
     tool, tool_handler, tool_router,
 };
+use rust_decimal::Decimal;
 
 use crate::{
     cache::{Fetch, Loaded},
@@ -188,37 +190,22 @@ resolution and all checks.",
         let (categories, category) = self
             .find_category_in(&wallet, &input.category, input.kind.map(Kind::from))
             .await?;
+        let new = NewTransaction {
+            wallet_id: wallet.id.clone(),
+            category_id: category.id.clone(),
+            amount,
+            note,
+            date,
+        };
 
         let dry_run = input.dry_run.unwrap_or(false);
         let id = if dry_run {
             None
         } else {
-            let new = NewTransaction {
-                wallet_id: wallet.id.clone(),
-                category_id: category.id.clone(),
-                amount,
-                note: note.clone(),
-                date,
-            };
-            // Resolving names can take a while; the user may have given up meanwhile.
-            if context.ct.is_cancelled() {
-                return Err("cancelled before writing; nothing was saved".into());
-            }
-            let fingerprint = fingerprint(&new);
-            self.write_guard
-                .admit(fingerprint.clone(), input.allow_duplicate.unwrap_or(false))?;
-            match self.client.add_transaction(&new).await {
-                Ok(id) => id,
-                Err(Error::OutcomeUnknown(reason)) => {
-                    return Err(uncertain_write(&reason, &wallet, date).into());
-                }
-                Err(not_saved) => {
-                    self.write_guard.forget(&fingerprint);
-                    return Err(not_saved.into());
-                }
-            }
+            let allow_duplicate = input.allow_duplicate.unwrap_or(false);
+            self.write_new(&context, &new, &wallet, allow_duplicate)
+                .await?
         };
-
         Ok(Json(AddTransactionOut {
             created: !dry_run,
             dry_run,
@@ -226,10 +213,10 @@ resolution and all checks.",
             wallet: wallet.name,
             category: category_label(&category, &categories),
             kind: category.kind,
-            amount: fmt_money(amount),
+            amount: fmt_money(new.amount),
             currency: wallet.currency,
-            date: date.to_string(),
-            note,
+            date: new.date.to_string(),
+            note: new.note,
         }))
     }
 
@@ -258,66 +245,25 @@ not have been saved: check list_transactions before retrying.",
         context: RequestContext<RoleServer>,
     ) -> Result<Json<UpdateTransactionOut>, String> {
         self.require_write()?;
-        if !input.changes_something() {
-            return Err(
-                "nothing to change: pass at least one of category, amount, note or new_date".into(),
-            );
-        }
-        if input.kind.is_some() && input.category.is_none() {
-            return Err(
-                "type is only used together with category; the type of a transaction \
-                        comes from its category"
-                    .into(),
-            );
-        }
-        let amount = input.amount.as_ref().map(parse_amount).transpose()?;
-        if let Some(amount) = amount {
-            self.write_guard.check_amount(amount)?;
-        }
-        let note = input.note.map(|n| parse_note(Some(n))).transpose()?;
-        let new_date = input
-            .new_date
-            .as_deref()
-            .map(|d| parse_date("new_date", d))
-            .transpose()?;
-        if let Some(date) = new_date {
-            check_date(date, today_in(self.client.config().timezone))?;
-        }
+        let edits = self.validated_edits(&input)?;
         let (stored, wallet) = self
             .find_changeable(&input.id, &input.wallet, &input.date)
             .await?;
+        let category = self.category_after_update(&input, &stored, &wallet).await?;
         let current = &stored.transaction;
-
-        let (category_id, category_name, kind) = match &input.category {
-            Some(name) => {
-                let (_, category) = self
-                    .find_category_in(&wallet, name, input.kind.map(Kind::from))
-                    .await?;
-                (category.id, category.name, category.kind)
-            }
-            None => {
-                let id = stored.category_id.clone().ok_or_else(|| {
-                    Error::Protocol(format!(
-                        "the category of transaction '{}' could not be read; pass category explicitly",
-                        current.id
-                    ))
-                })?;
-                (id, current.category_name.clone(), current.kind)
-            }
-        };
         let change = NewTransaction {
             wallet_id: wallet.id.clone(),
-            category_id,
-            amount: amount.unwrap_or(current.amount.abs()),
-            note: note.unwrap_or_else(|| current.note.clone()),
-            date: new_date.unwrap_or(current.date),
+            category_id: category.id,
+            amount: edits.amount.unwrap_or(current.amount.abs()),
+            note: edits.note.unwrap_or_else(|| current.note.clone()),
+            date: edits.date.unwrap_or(current.date),
         };
         let after = TransactionOut {
             id: current.id.clone(),
             date: change.date.to_string(),
             wallet: wallet.name.clone(),
-            category: category_name,
-            kind,
+            category: category.name,
+            kind: category.kind,
             amount: fmt_money(change.amount),
             currency: wallet.currency.clone().or_else(|| current.currency.clone()),
             note: change.note.clone(),
@@ -405,8 +351,84 @@ impl MoneyLoverServer {
         }
     }
 
+    /// Checks every field of an update before anything is looked up in Money Lover.
+    fn validated_edits(&self, input: &UpdateTransactionInput) -> error::Result<Edits> {
+        if !input.changes_something() {
+            return Err(Error::Invalid(
+                "nothing to change: pass at least one of category, amount, note or new_date".into(),
+            ));
+        }
+        if input.kind.is_some() && input.category.is_none() {
+            return Err(Error::Invalid(
+                "type is only used together with category; the type of a transaction \
+                 comes from its category"
+                    .into(),
+            ));
+        }
+        let amount = input.amount.as_ref().map(parse_amount).transpose()?;
+        if let Some(amount) = amount {
+            self.write_guard.check_amount(amount)?;
+        }
+        let note = input
+            .note
+            .clone()
+            .map(|n| parse_note(Some(n)))
+            .transpose()?;
+        let date = input
+            .new_date
+            .as_deref()
+            .map(|d| parse_date("new_date", d))
+            .transpose()?;
+        if let Some(date) = date {
+            check_date(date, today_in(self.client.config().timezone))?;
+        }
+        Ok(Edits { amount, note, date })
+    }
+
+    /// The category named in the update, or else the one the transaction already has.
+    async fn category_after_update(
+        &self,
+        input: &UpdateTransactionInput,
+        stored: &StoredTransaction,
+        wallet: &Wallet,
+    ) -> error::Result<ChosenCategory> {
+        if let Some(name) = &input.category {
+            let (_, category) = self
+                .find_category_in(wallet, name, input.kind.map(Kind::from))
+                .await?;
+            return Ok(ChosenCategory {
+                id: category.id,
+                name: category.name,
+                kind: category.kind,
+            });
+        }
+        let current = &stored.transaction;
+        let id = stored.category_id.clone().ok_or_else(|| {
+            Error::Protocol(format!(
+                "the category of transaction '{}' could not be read; pass category explicitly",
+                current.id
+            ))
+        })?;
+        Ok(ChosenCategory {
+            id,
+            name: current.category_name.clone(),
+            kind: current.kind,
+        })
+    }
+
     /// Finds an existing transaction that this server may change or delete.
     async fn find_changeable(
+        &self,
+        id: &str,
+        wallet_name: &str,
+        date: &str,
+    ) -> error::Result<(StoredTransaction, Wallet)> {
+        let (stored, wallet) = self.find_stored(id, wallet_name, date).await?;
+        self.ensure_changeable(&stored, &wallet)?;
+        Ok((stored, wallet))
+    }
+
+    async fn find_stored(
         &self,
         id: &str,
         wallet_name: &str,
@@ -429,10 +451,15 @@ impl MoneyLoverServer {
                     wallet.name
                 ))
             })?;
+        Ok((stored, wallet))
+    }
+
+    fn ensure_changeable(&self, stored: &StoredTransaction, wallet: &Wallet) -> error::Result<()> {
         if stored.is_linked() {
             return Err(Error::Invalid(format!(
-                "refused: transaction '{id}' is part of a transfer, debt or loan and is linked to other transactions; \
-                 change it in the Money Lover app"
+                "refused: transaction '{}' is part of a transfer, debt or loan and is linked to other transactions; \
+                 change it in the Money Lover app",
+                stored.transaction.id
             )));
         }
         if wallet.archived {
@@ -441,7 +468,7 @@ impl MoneyLoverServer {
                 wallet.name
             )));
         }
-        self.write_guard.check_wallet(&wallet)?;
+        self.write_guard.check_wallet(wallet)?;
         check_date(
             stored.transaction.date,
             today_in(self.client.config().timezone),
@@ -450,8 +477,36 @@ impl MoneyLoverServer {
             Error::Invalid(format!(
                 "{e}; older or later transactions can only be changed in the Money Lover app"
             ))
-        })?;
-        Ok((stored, wallet))
+        })
+    }
+
+    /// Sends a new transaction once the guard admits it. A failure that certainly
+    /// saved nothing is forgotten, so a corrected retry is neither refused as a
+    /// duplicate nor counted against the hourly limit.
+    async fn write_new(
+        &self,
+        context: &RequestContext<RoleServer>,
+        new: &NewTransaction,
+        wallet: &Wallet,
+        allow_duplicate: bool,
+    ) -> error::Result<Option<String>> {
+        // Resolving names can take a while; the user may have given up meanwhile.
+        if context.ct.is_cancelled() {
+            return Err(Error::Invalid(
+                "cancelled before writing; nothing was saved".into(),
+            ));
+        }
+        let fingerprint = fingerprint(new);
+        self.write_guard
+            .admit(fingerprint.clone(), allow_duplicate)?;
+        match self.client.add_transaction(new).await {
+            Ok(id) => Ok(id),
+            Err(Error::OutcomeUnknown(reason)) => Err(uncertain_write(&reason, wallet, new.date)),
+            Err(not_saved) => {
+                self.write_guard.forget(&fingerprint);
+                Err(not_saved)
+            }
+        }
     }
 
     /// Sends an update or delete once the guard admits it. A failure that certainly
@@ -552,6 +607,20 @@ impl MoneyLoverServer {
     }
 }
 
+/// The new values an update asks for; `None` keeps the current value.
+struct Edits {
+    amount: Option<Decimal>,
+    note: Option<String>,
+    date: Option<NaiveDate>,
+}
+
+/// The category a transaction ends up in after an update.
+struct ChosenCategory {
+    id: String,
+    name: String,
+    kind: Kind,
+}
+
 /// Looks something up in cached data. A miss triggers exactly one fresh load, so a
 /// wallet or category created a moment ago in the app is still found.
 async fn find_with_reload<T, Found, Reload>(
@@ -603,7 +672,7 @@ fn fingerprint(new: &NewTransaction) -> Fingerprint {
 }
 
 /// Saying explicitly that a write may have been saved stops the agent from blindly retrying.
-fn uncertain_write(reason: &str, wallet: &Wallet, date: chrono::NaiveDate) -> Error {
+fn uncertain_write(reason: &str, wallet: &Wallet, date: NaiveDate) -> Error {
     Error::OutcomeUnknown(format!(
         "UNCERTAIN: {reason}. The transaction may or may not have been saved. \
          Check list_transactions for {date} in wallet '{}' before trying again; \
@@ -614,14 +683,14 @@ fn uncertain_write(reason: &str, wallet: &Wallet, date: chrono::NaiveDate) -> Er
 }
 
 /// Like `uncertain_write`, for an update or delete of an existing transaction.
-fn uncertain_change(error: Error, what: &str, transaction: &Transaction) -> String {
+fn uncertain_change(error: Error, what: &str, transaction: &Transaction) -> Error {
     match error {
-        Error::OutcomeUnknown(reason) => format!(
+        Error::OutcomeUnknown(reason) => Error::OutcomeUnknown(format!(
             "UNCERTAIN: {reason}. The {what} may or may not have been saved. Check list_transactions for {} \
              in wallet '{}' before trying again.",
             transaction.date, transaction.wallet_name
-        ),
-        other => other.into(),
+        )),
+        other => other,
     }
 }
 

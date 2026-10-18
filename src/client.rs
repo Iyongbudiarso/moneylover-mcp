@@ -17,14 +17,13 @@ use crate::{
     config::Config,
     error::{Error, Result, api_error},
     http::send_json,
-    model::{Category, StoredTransaction, Transaction, Wallet, fmt_money, items},
+    model::{API_DATE_FORMAT, Category, StoredTransaction, Transaction, Wallet, fmt_money, items},
 };
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_READ_RETRIES: u32 = 2;
 const FIRST_RETRY_DELAY_MS: u64 = 500;
 const TOKEN_REJECTED: i64 = 706;
-const API_DATE_FORMAT: &str = "%Y-%m-%d";
 /// `/transaction/list` returns at most this many rows and silently drops the rest
 /// (observed on a live account). A full page is treated as possibly incomplete.
 const MAX_TRANSACTION_ROWS: usize = 9999;
@@ -368,54 +367,62 @@ fn currency_by_wallet(wallets: &[Wallet]) -> HashMap<String, String> {
 /// "exclude from report" flag are copied from the stored transaction unchanged.
 fn edit_payload(stored: &StoredTransaction, new: &NewTransaction) -> Value {
     let raw = &stored.raw;
-    let text = |v: Option<&Value>| v.and_then(Value::as_str).unwrap_or("").to_string();
-    let number = |key: &str| {
-        raw.get(key)
-            .filter(|v| v.is_number())
-            .cloned()
-            .unwrap_or(json!(0))
-    };
-    // `address` is a JSON object serialized into a string.
-    let address: Value = raw
-        .get("address")
-        .and_then(Value::as_str)
-        .and_then(|s| serde_json::from_str(s).ok())
-        .unwrap_or(Value::Null);
-    let with: Vec<&str> = raw
-        .get("with")
-        .and_then(Value::as_array)
-        .map(|people| people.iter().filter_map(Value::as_str).collect())
-        .unwrap_or_default();
-    let event = raw
-        .get("campaign")
-        .and_then(|c| c.get(0))
-        .and_then(|c| match c {
-            Value::String(id) => Some(id.clone()),
-            _ => c.get("_id").and_then(Value::as_str).map(str::to_string),
-        })
-        .unwrap_or_default();
-
+    let address = stored_address(raw);
     let mut payload = json!({
         "_id": stored.transaction.id,
-        "with": with,
+        "with": stored_people(raw),
         "account": new.wallet_id,
         "category": new.category_id,
         "amount": fmt_money(new.amount),
         "note": new.note,
         "displayDate": new.date.format(API_DATE_FORMAT).to_string(),
-        "event": event,
+        "event": stored_event_id(raw),
         "exclude_report": stored.transaction.exclude_report,
-        "longtitude": number("longtitude"),
-        "latitude": number("latitude"),
-        "addressName": text(address.get("name")),
-        "addressDetails": text(address.get("details")),
-        "addressIcon": text(address.get("icon")),
-        "image": text(raw.get("images").and_then(|i| i.get(0))),
+        "longtitude": number_or_zero(raw.get("longtitude")),
+        "latitude": number_or_zero(raw.get("latitude")),
+        "addressName": text_or_empty(address.get("name")),
+        "addressDetails": text_or_empty(address.get("details")),
+        "addressIcon": text_or_empty(address.get("icon")),
+        "image": text_or_empty(raw.get("images").and_then(|i| i.get(0))),
     });
     if let Some(remind) = raw.get("remind").filter(|r| !r.is_null()) {
         payload["remind"] = remind.clone();
     }
     payload
+}
+
+/// `address` is a JSON object serialized into a string.
+fn stored_address(raw: &Value) -> Value {
+    raw.get("address")
+        .and_then(Value::as_str)
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or(Value::Null)
+}
+
+fn stored_people(raw: &Value) -> Vec<&str> {
+    raw.get("with")
+        .and_then(Value::as_array)
+        .map(|people| people.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default()
+}
+
+/// The first `campaign` entry is the event, given as its id or as the event itself.
+fn stored_event_id(raw: &Value) -> String {
+    raw.get("campaign")
+        .and_then(|c| c.get(0))
+        .and_then(|event| match event {
+            Value::String(id) => Some(id.clone()),
+            _ => event.get("_id").and_then(Value::as_str).map(str::to_string),
+        })
+        .unwrap_or_default()
+}
+
+fn text_or_empty(value: Option<&Value>) -> String {
+    value.and_then(Value::as_str).unwrap_or("").to_string()
+}
+
+fn number_or_zero(value: Option<&Value>) -> Value {
+    value.filter(|v| v.is_number()).cloned().unwrap_or(json!(0))
 }
 
 fn created_id(body: &Value) -> Option<String> {

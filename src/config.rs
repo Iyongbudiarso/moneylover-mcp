@@ -22,7 +22,7 @@ const MAX_WRITES_PER_HOUR_RANGE: RangeInclusive<usize> = 1..=1000;
 pub struct Config {
     pub email: Option<String>,
     pub password: Option<String>,
-    /// Write tools are not registered unless this is true.
+    /// Unless this is true, every write tool refuses the call (dry runs included).
     pub allow_write: bool,
     pub timezone: Tz,
     pub token_path: PathBuf,

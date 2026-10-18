@@ -8,7 +8,7 @@ use serde_json::Value;
 use super::schema::AmountInput;
 use crate::{
     error::{Error, Result},
-    model::parse_decimal,
+    model::{API_DATE_FORMAT, parse_decimal},
 };
 
 const DEFAULT_LIMIT: usize = 50;
@@ -17,7 +17,6 @@ const MAX_RANGE_DAYS: i64 = 366;
 const MAX_NOTE_CHARS: usize = 500;
 const MAX_DECIMAL_PLACES: u32 = 8;
 const MAX_AMOUNT: i64 = 1_000_000_000_000_000;
-const DATE_FORMAT: &str = "%Y-%m-%d";
 
 #[derive(Debug, Clone, Copy)]
 pub struct DateRange {
@@ -47,7 +46,7 @@ impl DateRange {
 }
 
 pub fn parse_date(field: &str, value: &str) -> Result<NaiveDate> {
-    NaiveDate::parse_from_str(value.trim(), DATE_FORMAT).map_err(|_| {
+    NaiveDate::parse_from_str(value.trim(), API_DATE_FORMAT).map_err(|_| {
         invalid(format!(
             "{field} must be a date formatted YYYY-MM-DD, got '{value}'"
         ))
