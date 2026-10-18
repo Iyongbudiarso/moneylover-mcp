@@ -1,0 +1,3 @@
+# Default owner for everything in the repository.
+# Required by the branch ruleset ("Require review from Code Owners").
+* @Iyongbudiarso
