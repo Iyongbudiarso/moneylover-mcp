@@ -8,15 +8,16 @@ use crate::model::{Kind, Transaction, TxType, Wallet, fmt_money};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ListWalletsInput {
-    /// Bypass the cache and fetch live balances (slow on large accounts).
+    /// Set to true to bypass the short-lived cache and fetch live balances. Slow on large accounts,
+    /// so leave it unset (default false) unless the user explicitly needs a live figure.
     pub refresh: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ListCategoriesInput {
-    /// Wallet name. Omit for the account-wide category list.
+    /// Wallet name, exactly as returned by list_wallets (case-insensitive). Omit for the account-wide category list.
     pub wallet: Option<String>,
-    /// Only return categories of this type.
+    /// Filter by category type: "income" or "expense". Omit to return both.
     #[serde(rename = "type")]
     pub kind: Option<TxType>,
 }
@@ -33,11 +34,13 @@ impl ListCategoriesInput {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ListTransactionsInput {
-    /// First day, inclusive, as YYYY-MM-DD.
+    /// First day of the range, inclusive, as YYYY-MM-DD in the user's timezone, e.g. "2026-04-01".
     pub start_date: String,
-    /// Last day, inclusive, as YYYY-MM-DD.
+    /// Last day of the range, inclusive, as YYYY-MM-DD. Must not be before start_date; the whole
+    /// range may span at most 366 days.
     pub end_date: String,
-    /// Wallet name. Omit for all wallets.
+    /// Wallet name, exactly as returned by list_wallets. Omit for all wallets, including archived
+    /// ones and those excluded from Money Lover's total.
     pub wallet: Option<String>,
     /// Only transactions in the category with this exact name (case-insensitive).
     pub category: Option<String>,
@@ -47,13 +50,15 @@ pub struct ListTransactionsInput {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SummarizeInput {
-    /// First day, inclusive, as YYYY-MM-DD.
+    /// First day of the range, inclusive, as YYYY-MM-DD in the user's timezone, e.g. "2026-04-01".
     pub start_date: String,
-    /// Last day, inclusive, as YYYY-MM-DD.
+    /// Last day of the range, inclusive, as YYYY-MM-DD. Must not be before start_date; the whole
+    /// range may span at most 366 days.
     pub end_date: String,
-    /// Wallet name. Omit for all wallets.
+    /// Wallet name, exactly as returned by list_wallets. Omit to total across all wallets, including
+    /// archived ones and those excluded from Money Lover's total.
     pub wallet: Option<String>,
-    /// Which side to total. Defaults to expense.
+    /// Which side to total: "expense" (spending) or "income" (earnings). Defaults to "expense".
     #[serde(rename = "type")]
     pub kind: Option<TxType>,
 }
@@ -78,7 +83,8 @@ pub struct AddTransactionInput {
     pub note: Option<String>,
     /// Transaction date as YYYY-MM-DD. Defaults to today in the user's timezone.
     pub date: Option<String>,
-    /// Only needed when the category name exists as both income and expense.
+    /// "income" or "expense". Only needed when the category name exists as both; otherwise it is
+    /// taken from the category.
     #[serde(rename = "type")]
     pub kind: Option<TxType>,
     /// If true, validate and resolve everything but do not create the transaction.
@@ -86,6 +92,52 @@ pub struct AddTransactionInput {
     /// Set to true only when the user explicitly wants a second transaction identical
     /// to one created in the last few minutes.
     pub allow_duplicate: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct UpdateTransactionInput {
+    /// Id of the transaction, exactly as returned by list_transactions.
+    pub id: String,
+    /// Name of the wallet the transaction is in, exactly as returned by list_transactions.
+    pub wallet: String,
+    /// The transaction's current date as YYYY-MM-DD, exactly as returned by list_transactions.
+    /// Used to find it; to move it to another day use new_date.
+    pub date: String,
+    /// New category name as returned by list_categories for the transaction's wallet. Sub-categories
+    /// may be written as "Parent > Child". Omit to keep the current category.
+    pub category: Option<String>,
+    /// "income" or "expense". Only used with category, when that name exists as both.
+    #[serde(rename = "type")]
+    pub kind: Option<TxType>,
+    /// New positive amount in the wallet's currency, e.g. 50000 or "12.50". Omit to keep the current amount.
+    pub amount: Option<AmountInput>,
+    /// New note, replacing the old one entirely. Pass "" to clear it; omit to keep it.
+    pub note: Option<String>,
+    /// New date as YYYY-MM-DD. Omit to keep the current date.
+    pub new_date: Option<String>,
+    /// If true, find the transaction and validate the change, but do not save it.
+    pub dry_run: Option<bool>,
+}
+
+impl UpdateTransactionInput {
+    pub fn changes_something(&self) -> bool {
+        self.category.is_some()
+            || self.amount.is_some()
+            || self.note.is_some()
+            || self.new_date.is_some()
+    }
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DeleteTransactionInput {
+    /// Id of the transaction, exactly as returned by list_transactions.
+    pub id: String,
+    /// Name of the wallet the transaction is in, exactly as returned by list_transactions.
+    pub wallet: String,
+    /// The transaction's date as YYYY-MM-DD, exactly as returned by list_transactions. Used to find it.
+    pub date: String,
+    /// If true, find the transaction and run every check, but do not delete it.
+    pub dry_run: Option<bool>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -144,7 +196,9 @@ pub struct CategoriesOut {
 
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct TransactionOut {
+    /// Pass together with wallet and date to update_transaction or delete_transaction.
     pub id: String,
+    /// YYYY-MM-DD in the user's timezone.
     pub date: String,
     pub wallet: String,
     pub category: String,
@@ -255,4 +309,26 @@ pub struct AddTransactionOut {
     pub date: String,
     /// The stored note, trimmed; empty when none was given.
     pub note: String,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct UpdateTransactionOut {
+    /// True only if the change was really saved.
+    pub updated: bool,
+    /// True when nothing was sent to Money Lover.
+    pub dry_run: bool,
+    /// The transaction as it was before this call.
+    pub before: TransactionOut,
+    /// The transaction as it is (or, for a dry run, would be) after this call.
+    pub after: TransactionOut,
+}
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DeleteTransactionOut {
+    /// True only if the transaction was really deleted.
+    pub deleted: bool,
+    /// True when nothing was sent to Money Lover.
+    pub dry_run: bool,
+    /// The transaction that was (or, for a dry run, would be) deleted.
+    pub transaction: TransactionOut,
 }

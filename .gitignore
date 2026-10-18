@@ -5,6 +5,8 @@ token.json
 .env.*
 token.lock
 *.revoked
+# mcp-publisher login tokens (older versions write them to the current directory)
+.mcpregistry_*
 .DS_Store
 /fuzz/target
 /fuzz/corpus

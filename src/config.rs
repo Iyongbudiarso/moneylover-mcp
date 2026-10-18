@@ -22,14 +22,14 @@ const MAX_WRITES_PER_HOUR_RANGE: RangeInclusive<usize> = 1..=1000;
 pub struct Config {
     pub email: Option<String>,
     pub password: Option<String>,
-    /// Write tools are not registered unless this is true.
+    /// Unless this is true, every write tool refuses the call (dry runs included).
     pub allow_write: bool,
     pub timezone: Tz,
     pub token_path: PathBuf,
     pub request_timeout: Duration,
     /// How long wallets and categories are kept in memory. Zero disables the cache.
     pub cache_ttl: Duration,
-    /// Upper bound on created transactions per rolling hour (runaway-agent guard).
+    /// Upper bound on adds, updates and deletes per rolling hour (runaway-agent guard).
     pub max_writes_per_hour: usize,
     /// When set, writes are only allowed into these wallets (normalized names).
     pub write_wallets: Option<Vec<String>>,

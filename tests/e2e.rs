@@ -184,16 +184,37 @@ async fn add_transaction_stays_listed_but_refuses_when_read_only() {
     assert!(names.contains(&"summarize_spending".to_string()));
     // Listed, not hidden: a client (and a security scanner) sees the whole surface,
     // and the server, not the client, is what enforces read-only.
-    assert!(names.contains(&"add_transaction".to_string()), "{names:?}");
+    for write_tool in [
+        "add_transaction",
+        "update_transaction",
+        "delete_transaction",
+    ] {
+        assert!(names.contains(&write_tool.to_string()), "{names:?}");
+    }
 
-    let args = json!({"wallet": "MCP Test", "category": "Food", "amount": 5, "dry_run": true});
-    let result = call(&client, "add_transaction", args).await;
-    assert_eq!(result.is_error, Some(true));
-    assert!(
-        text_of(&result).contains("MONEYLOVER_ALLOW_WRITE"),
-        "{}",
-        text_of(&result)
-    );
+    let attempts = [
+        (
+            "add_transaction",
+            json!({"wallet": "MCP Test", "category": "Food", "amount": 5, "dry_run": true}),
+        ),
+        (
+            "update_transaction",
+            json!({"id": "t1", "wallet": "MCP Test", "date": "2026-04-18", "amount": 5, "dry_run": true}),
+        ),
+        (
+            "delete_transaction",
+            json!({"id": "t1", "wallet": "MCP Test", "date": "2026-04-18", "dry_run": true}),
+        ),
+    ];
+    for (tool, args) in attempts {
+        let result = call(&client, tool, args).await;
+        assert_eq!(result.is_error, Some(true), "{tool}");
+        assert!(
+            text_of(&result).contains("MONEYLOVER_ALLOW_WRITE"),
+            "{tool}: {}",
+            text_of(&result)
+        );
+    }
 }
 
 #[tokio::test]
@@ -202,8 +223,14 @@ async fn write_flag_enables_add_transaction() {
     h.seed_token("tok", "ref", FAR_FUTURE);
     let client = h.connect(h.config(true, false)).await;
     let tools = client.list_all_tools().await.unwrap();
-    assert_eq!(tools.len(), 5);
+    assert_eq!(tools.len(), 7);
     assert!(tools.iter().any(|t| t.name == "add_transaction"));
+    for name in ["update_transaction", "delete_transaction"] {
+        let tool = tools.iter().find(|t| t.name == name).unwrap();
+        let annotations = tool.annotations.as_ref().unwrap();
+        assert_eq!(annotations.read_only_hint, Some(false), "{name}");
+        assert_eq!(annotations.destructive_hint, Some(true), "{name}");
+    }
 }
 
 #[tokio::test]
@@ -352,6 +379,15 @@ async fn summarizes_spending_per_category_and_skips_excluded() {
         )
         .mount(&h.mock)
         .await;
+    // "all" may leave out the archived wallet, so it is asked separately.
+    mount_wallet_transactions(
+        &h,
+        "w3",
+        json!([{"_id": "t-old", "amount": 1000, "displayDate": "2026-04-02T03:00:00.000Z",
+                "account": {"_id": "w3", "name": "Old"},
+                "category": {"_id": "c1", "name": "Food", "type": 2}}]),
+    )
+    .await;
     let client = h.connect(h.config(false, false)).await;
 
     let result = call(
@@ -364,9 +400,145 @@ async fn summarizes_spending_per_category_and_skips_excluded() {
     assert_eq!(out["type"], "expense");
     let idr = &out["currencies"][0];
     assert_eq!(idr["currency"], "IDR");
-    assert_eq!(idr["total"], "75000.5", "t4 is excluded from reports");
-    assert_eq!(idr["count"], 2);
+    assert_eq!(idr["total"], "76000.5", "t4 is excluded from reports");
+    assert_eq!(idr["count"], 3);
     assert_eq!(idr["categories"][0]["category"], "Lunch");
+    assert_eq!(idr["categories"][1]["category"], "Food");
+}
+
+/// Answers `/transaction/list` for one wallet in April 2026.
+async fn mount_wallet_transactions(h: &Harness, wallet_id: &str, transactions: Value) {
+    Mock::given(method("POST"))
+        .and(path("/api/transaction/list"))
+        .and(body_json(
+            json!({"walletId": wallet_id, "startDate": "2026-04-01", "endDate": "2026-04-30"}),
+        ))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"error": 0, "data": {"transactions": transactions}})),
+        )
+        .expect(1)
+        .mount(&h.mock)
+        .await;
+}
+
+fn april_row(id: &str, wallet: (&str, &str)) -> Value {
+    json!({"_id": id, "amount": 10, "note": "", "displayDate": "2026-04-10T03:00:00.000Z",
+           "account": {"_id": wallet.0, "name": wallet.1},
+           "category": {"_id": "c1", "name": "Food", "type": 2}})
+}
+
+fn ids_listed(result: &CallToolResult) -> Vec<String> {
+    let mut ids: Vec<String> = structured(result)["transactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap().to_string())
+        .collect();
+    ids.sort();
+    ids
+}
+
+#[tokio::test]
+async fn all_wallets_includes_wallets_excluded_from_the_total_once() {
+    let h = Harness::new().await;
+    h.seed_token("tok", "ref", FAR_FUTURE);
+    h.mount(
+        "/wallet/list",
+        json!([
+            {"_id": "w1", "name": "Cash", "balance": [{"IDR": "1"}]},
+            {"_id": "w2", "name": "Savings", "exclude_total": true, "balance": [{"IDR": "1"}]},
+        ]),
+    )
+    .await;
+    // Like the real API, "all" leaves out the wallet excluded from the total; a row
+    // that shows up in both answers is listed once.
+    mount_wallet_transactions(
+        &h,
+        "all",
+        json!([
+            april_row("a", ("w1", "Cash")),
+            april_row("both", ("w2", "Savings"))
+        ]),
+    )
+    .await;
+    mount_wallet_transactions(
+        &h,
+        "w2",
+        json!([
+            april_row("b", ("w2", "Savings")),
+            april_row("both", ("w2", "Savings"))
+        ]),
+    )
+    .await;
+    let client = h.connect(h.config(false, false)).await;
+
+    let result = call(
+        &client,
+        "list_transactions",
+        json!({"start_date": "2026-04-01", "end_date": "2026-04-30"}),
+    )
+    .await;
+    assert_eq!(ids_listed(&result), ["a", "b", "both"]);
+}
+
+#[tokio::test]
+async fn a_full_page_from_all_falls_back_to_every_wallet() {
+    let h = Harness::new().await;
+    h.seed_token("tok", "ref", FAR_FUTURE);
+    h.mount(
+        "/wallet/list",
+        json!([
+            {"_id": "w1", "name": "Cash", "balance": [{"IDR": "1"}]},
+            {"_id": "w2", "name": "Bank", "balance": [{"IDR": "1"}]},
+        ]),
+    )
+    .await;
+    // 9999 rows is Money Lover's cap, so "all" is incomplete and its rows unused.
+    let capped: Vec<Value> = (0..9999)
+        .map(|i| april_row(&format!("capped{i}"), ("w1", "Cash")))
+        .collect();
+    mount_wallet_transactions(&h, "all", Value::Array(capped)).await;
+    mount_wallet_transactions(&h, "w1", json!([april_row("a", ("w1", "Cash"))])).await;
+    mount_wallet_transactions(&h, "w2", json!([april_row("b", ("w2", "Bank"))])).await;
+    let client = h.connect(h.config(false, false)).await;
+
+    let result = call(
+        &client,
+        "list_transactions",
+        json!({"start_date": "2026-04-01", "end_date": "2026-04-30"}),
+    )
+    .await;
+    assert_eq!(ids_listed(&result), ["a", "b"]);
+}
+
+#[tokio::test]
+async fn a_full_page_from_one_wallet_is_an_error_not_a_wrong_total() {
+    let h = Harness::new().await;
+    h.seed_token("tok", "ref", FAR_FUTURE);
+    h.mount(
+        "/wallet/list",
+        json!([{"_id": "w1", "name": "Cash", "balance": [{"IDR": "1"}]}]),
+    )
+    .await;
+    let capped: Vec<Value> = (0..9999)
+        .map(|i| april_row(&format!("capped{i}"), ("w1", "Cash")))
+        .collect();
+    mount_wallet_transactions(&h, "w1", Value::Array(capped)).await;
+    let client = h.connect(h.config(false, false)).await;
+
+    let result = call(
+        &client,
+        "summarize_spending",
+        json!({"start_date": "2026-04-01", "end_date": "2026-04-30", "wallet": "Cash"}),
+    )
+    .await;
+    assert_eq!(result.is_error, Some(true));
+    assert!(
+        text_of(&result).contains("shorter date ranges"),
+        "{}",
+        text_of(&result)
+    );
 }
 
 #[tokio::test]
@@ -1093,6 +1265,332 @@ async fn a_device_removed_during_refresh_signs_out_instead_of_logging_in() {
         "{}",
         text_of(&result)
     );
+}
+
+// ---------------------------------------------------------------------------
+// Updating and deleting existing transactions
+// ---------------------------------------------------------------------------
+
+fn days_ago(days: u64) -> chrono::NaiveDate {
+    chrono::Utc::now().date_naive() - chrono::Days::new(days)
+}
+
+/// A plain transaction and half of a transfer in "MCP Test", one transaction in
+/// "Cash", all a few days old. Each wallet answers only the request that looks it
+/// up (its own id, the stored date with one day either side), like the real API
+/// where `walletId: "all"` leaves out wallets excluded from the total.
+async fn mount_existing_transactions(h: &Harness) -> String {
+    let date = days_ago(3);
+    let display = format!("{date}T05:00:00.000Z");
+    let per_wallet = [
+        (
+            "w2",
+            json!([
+                {"_id": "t1", "amount": 50000, "note": "nasi padang", "displayDate": display,
+                 "account": {"_id": "w2", "name": "MCP Test"},
+                 "category": {"_id": "c2", "name": "Lunch", "type": 2},
+                 "with": ["Ann"], "exclude_report": true, "images": ["receipt.jpg"]},
+                {"_id": "t-transfer", "amount": 10, "note": "", "displayDate": display, "related": "t-other",
+                 "account": {"_id": "w2", "name": "MCP Test"},
+                 "category": {"_id": "c5", "name": "Other", "type": 2}}
+            ]),
+        ),
+        (
+            "w1",
+            json!([
+                {"_id": "t-cash", "amount": 10, "note": "", "displayDate": display,
+                 "account": {"_id": "w1", "name": "Cash"},
+                 "category": {"_id": "c1", "name": "Food", "type": 2}}
+            ]),
+        ),
+    ];
+    for (wallet_id, transactions) in per_wallet {
+        Mock::given(method("POST"))
+            .and(path("/api/transaction/list"))
+            .and(body_json(json!({
+                "walletId": wallet_id,
+                "startDate": (date - chrono::Days::new(1)).to_string(),
+                "endDate": (date + chrono::Days::new(1)).to_string(),
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "error": 0,
+                "data": {"transactions": transactions}
+            })))
+            .mount(&h.mock)
+            .await;
+    }
+    date.to_string()
+}
+
+#[tokio::test]
+async fn update_transaction_changes_only_what_was_asked_and_keeps_the_rest() {
+    let (h, client) = write_harness(|_| {}).await;
+    let date = mount_existing_transactions(&h).await;
+    Mock::given(method("POST"))
+        .and(path("/api/transaction/edit"))
+        .and(header("authorization", "AuthJWT tok"))
+        .and(body_json(json!({
+            "_id": "t1", "with": ["Ann"], "account": "w2", "category": "c1",
+            "amount": "45000", "note": "nasi padang", "displayDate": date, "event": "",
+            "exclude_report": true, "longtitude": 0, "latitude": 0,
+            "addressName": "", "addressDetails": "", "addressIcon": "", "image": "receipt.jpg"
+        })))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"error": 0, "msg": "transaction_edit_success", "data": {}})),
+        )
+        .expect(1)
+        .mount(&h.mock)
+        .await;
+
+    let args = json!({"id": "t1", "wallet": "MCP Test", "date": date, "category": "Food", "amount": 45000});
+    let mut preview = args.clone();
+    preview["dry_run"] = json!(true);
+    let out = structured(&call(&client, "update_transaction", preview).await).clone();
+    assert_eq!(out["updated"], false);
+    assert_eq!(out["before"]["category"], "Lunch");
+    assert_eq!(out["after"]["category"], "Food");
+
+    let out = structured(&call(&client, "update_transaction", args).await).clone();
+    assert_eq!(out["updated"], true);
+    assert_eq!(out["before"]["amount"], "50000");
+    assert_eq!(out["after"]["amount"], "45000");
+    assert_eq!(out["after"]["note"], "nasi padang");
+    assert_eq!(out["after"]["wallet"], "MCP Test");
+    // `expect(1)`: the dry run sent nothing.
+}
+
+#[tokio::test]
+async fn update_transaction_can_move_the_date_and_clear_the_note() {
+    let (h, client) = write_harness(|_| {}).await;
+    let date = mount_existing_transactions(&h).await;
+    let new_date = days_ago(1).to_string();
+    Mock::given(method("POST"))
+        .and(path("/api/transaction/edit"))
+        .and(body_string_contains(format!(
+            "\"displayDate\":\"{new_date}\""
+        )))
+        .and(body_string_contains("\"note\":\"\""))
+        .and(body_string_contains("\"category\":\"c2\""))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"error": 0, "data": {}})))
+        .expect(1)
+        .mount(&h.mock)
+        .await;
+
+    let out = call(
+        &client,
+        "update_transaction",
+        json!({"id": "t1", "wallet": "MCP Test", "date": date, "new_date": new_date, "note": "  "}),
+    )
+    .await;
+    assert_eq!(structured(&out)["after"]["date"], new_date);
+}
+
+#[tokio::test]
+async fn delete_transaction_sends_only_the_id_and_supports_dry_run() {
+    let (h, client) = write_harness(|_| {}).await;
+    let date = mount_existing_transactions(&h).await;
+    Mock::given(method("POST"))
+        .and(path("/api/transaction/delete"))
+        .and(header("authorization", "AuthJWT tok"))
+        .and(body_json(json!({"_id": "t1", "delRelated": false})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(
+                json!({"error": 0, "msg": "transaction_delete_success", "data": {}}),
+            ),
+        )
+        .expect(1)
+        .mount(&h.mock)
+        .await;
+
+    let preview = call(
+        &client,
+        "delete_transaction",
+        json!({"id": "t1", "wallet": "MCP Test", "date": date, "dry_run": true}),
+    )
+    .await;
+    let out = structured(&preview);
+    assert_eq!(out["deleted"], false);
+    assert_eq!(out["transaction"]["note"], "nasi padang");
+
+    let done = call(
+        &client,
+        "delete_transaction",
+        json!({"id": "t1", "wallet": "MCP Test", "date": date}),
+    )
+    .await;
+    assert_eq!(structured(&done)["deleted"], true);
+}
+
+#[tokio::test]
+async fn update_and_delete_refuse_before_any_write() {
+    let (h, client) = write_harness(|cfg| {
+        cfg.write_wallets = Some(vec!["mcp test".into()]);
+        cfg.max_amount = Some(rust_decimal::Decimal::from(100_000));
+    })
+    .await;
+    let date = mount_existing_transactions(&h).await;
+    for endpoint in ["/api/transaction/edit", "/api/transaction/delete"] {
+        Mock::given(method("POST"))
+            .and(path(endpoint))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"error": 0})))
+            .expect(0)
+            .mount(&h.mock)
+            .await;
+    }
+
+    let cases = [
+        (
+            "update_transaction",
+            json!({"id": "t1", "wallet": "MCP Test", "date": date}),
+            "nothing to change",
+        ),
+        (
+            "update_transaction",
+            json!({"id": "t1", "wallet": "MCP Test", "date": date, "type": "income"}),
+            "nothing to change",
+        ),
+        (
+            "update_transaction",
+            json!({"id": "t1", "wallet": "MCP Test", "date": date, "note": "x", "type": "income"}),
+            "only used together with category",
+        ),
+        (
+            "update_transaction",
+            json!({"id": "t1", "wallet": "MCP Test", "date": date, "amount": 100_001}),
+            "MONEYLOVER_MAX_AMOUNT",
+        ),
+        (
+            "update_transaction",
+            json!({"id": "t1", "wallet": "MCP Test", "date": date, "new_date": "2001-01-01"}),
+            "outside the allowed window",
+        ),
+        (
+            "update_transaction",
+            json!({"id": "t1", "wallet": "MCP Test", "date": date, "category": "Cash only"}),
+            "not found",
+        ),
+        (
+            "update_transaction",
+            json!({"id": "t-cash", "wallet": "Cash", "date": date, "note": "x"}),
+            "MONEYLOVER_WRITE_WALLETS",
+        ),
+        (
+            "delete_transaction",
+            json!({"id": "t-cash", "wallet": "Cash", "date": date}),
+            "MONEYLOVER_WRITE_WALLETS",
+        ),
+        (
+            "delete_transaction",
+            json!({"id": "t-transfer", "wallet": "MCP Test", "date": date}),
+            "transfer, debt or loan",
+        ),
+        (
+            "delete_transaction",
+            json!({"id": "missing", "wallet": "MCP Test", "date": date}),
+            "not found in wallet 'MCP Test'",
+        ),
+        (
+            "delete_transaction",
+            json!({"id": "t1", "wallet": "Cash", "date": date}),
+            "not found in wallet 'Cash'",
+        ),
+        (
+            "delete_transaction",
+            json!({"id": "t1", "wallet": "Nope", "date": date}),
+            "Available wallets",
+        ),
+        (
+            "delete_transaction",
+            json!({"id": "t1", "wallet": "MCP Test", "date": "18/04/2026"}),
+            "YYYY-MM-DD",
+        ),
+    ];
+    for (tool, args, expected) in cases {
+        let result = call(&client, tool, args.clone()).await;
+        assert_eq!(result.is_error, Some(true), "{tool} {args}");
+        assert!(
+            text_of(&result).contains(expected),
+            "{tool} {args}: {}",
+            text_of(&result)
+        );
+    }
+}
+
+#[tokio::test]
+async fn transactions_outside_the_write_window_cannot_be_changed() {
+    let (h, client) = write_harness(|_| {}).await;
+    h.mount(
+        "/transaction/list",
+        json!([{"_id": "old", "amount": 1, "displayDate": "2001-01-01",
+                "account": {"_id": "w2", "name": "MCP Test"},
+                "category": {"_id": "c1", "name": "Food", "type": 2}}]),
+    )
+    .await;
+    Mock::given(method("POST"))
+        .and(path("/api/transaction/delete"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"error": 0})))
+        .expect(0)
+        .mount(&h.mock)
+        .await;
+
+    let result = call(
+        &client,
+        "delete_transaction",
+        json!({"id": "old", "wallet": "MCP Test", "date": "2001-01-01"}),
+    )
+    .await;
+    assert!(
+        text_of(&result).contains("outside the allowed window"),
+        "{}",
+        text_of(&result)
+    );
+}
+
+#[tokio::test]
+async fn a_timed_out_delete_is_reported_as_uncertain_and_counts_towards_the_limit() {
+    let (h, client) = write_harness(|cfg| cfg.max_writes_per_hour = 2).await;
+    let date = mount_existing_transactions(&h).await;
+    Mock::given(method("POST"))
+        .and(path("/api/transaction/delete"))
+        .respond_with(ResponseTemplate::new(503))
+        .expect(1)
+        .mount(&h.mock)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/transaction/edit"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"error": 7, "msg": "rejected"})),
+        )
+        .expect(2)
+        .mount(&h.mock)
+        .await;
+
+    let first = call(
+        &client,
+        "delete_transaction",
+        json!({"id": "t1", "wallet": "MCP Test", "date": date}),
+    )
+    .await;
+    assert!(
+        text_of(&first).starts_with("UNCERTAIN"),
+        "{}",
+        text_of(&first)
+    );
+    // A rejected edit certainly changed nothing, so it does not use up the second slot.
+    for _ in 0..2 {
+        let rejected = call(
+            &client,
+            "update_transaction",
+            json!({"id": "t1", "wallet": "MCP Test", "date": date, "note": "x"}),
+        )
+        .await;
+        assert!(
+            text_of(&rejected).contains("rejected"),
+            "{}",
+            text_of(&rejected)
+        );
+    }
 }
 
 #[tokio::test]
