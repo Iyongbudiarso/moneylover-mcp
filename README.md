@@ -299,16 +299,21 @@ plus `SHA256SUMS.mcpb` and a generated `server.json` to the same release.
 ### Publishing to the MCP Registry
 
 This is a manual step on purpose: it needs an Ed25519 key that must not live in the repository or
-in CI. `scripts/publish-registry.sh` downloads the released bundles, re-checks every hash against
-`server.json` and publishes:
+in CI. `scripts/publish-registry.sh` fetches the released `server.json`, downloads the bundles once
+and caches them by SHA-256, logs in if the registry token has expired (it lives five minutes),
+re-checks every hash, publishes, and finally confirms the new version through the registry API:
 
 ```sh
 brew install mcp-publisher          # the registry's CLI, once
-scripts/publish-registry.sh v0.3.1
+scripts/publish-registry.sh v0.4.0            # ~20 s cold, ~2 s warm
+scripts/publish-registry.sh v0.4.0 --dry-run  # download + verify only
 ```
 
-The first time, and after a key rotation, the script's header explains how to generate the key,
-put the public half in a TXT record on the apex domain and run `mcp-publisher login dns`.
+If the version is already listed the script stops immediately instead of downloading anything.
+Bundles are cached in `~/.cache/mcp-publisher/<owner>__<repo>/<tag>/`, so re-running is free.
+
+The first time, and after a key rotation, the script's header explains how to generate the key and
+put the public half in a TXT record on the apex domain; the login itself is now part of the script.
 
 Two things to know: a published version is immutable, so bump the version rather than rebuilding a
 tag; and rebuilding a tag produces different bundle bytes (ZIP timestamps), so publish the registry
