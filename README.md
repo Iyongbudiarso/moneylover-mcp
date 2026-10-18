@@ -40,9 +40,9 @@ is enforced in code and checked in CI, not just stated here.
 | Tool | What it does | Needs write mode |
 |---|---|---|
 | `list_wallets` | Wallets with currency and balance (`refresh: true` for live balances) | no |
-| `list_categories` | Income/expense categories, optionally for one wallet | no |
+| `list_categories` | Income/expense categories, for the whole account or one wallet | no |
 | `list_transactions` | Transactions in a date range, newest first (`limit` default 50, max 200) | no |
-| `summarize_spending` | Totals per category and currency for a date range | no |
+| `summarize_spending` | Totals per category, grouped by currency, for a date range | no |
 | `add_transaction` | Create a transaction; supports `dry_run` | **yes** |
 
 Design choices that matter for LLM use:
@@ -52,7 +52,10 @@ Design choices that matter for LLM use:
 - Amounts are **always positive**. Income vs expense comes from the category. Pass `type` when a
   category name exists as both (e.g. "Other").
 - Money is returned as **decimal strings**, never floats.
-- Dates are `YYYY-MM-DD` in your configured timezone.
+- Dates are `YYYY-MM-DD` in your configured timezone. A date range may cover at most **366 days**
+  per call; `add_transaction` accepts dates from a year back up to a month ahead.
+- `summarize_spending` skips transactions flagged "exclude from report"; `list_transactions`
+  still lists them, so the two never disagree silently.
 - `add_transaction` is **always listed**, so a client and its security scanner see the whole surface,
   but without `MONEYLOVER_ALLOW_WRITE=true` every call is refused before it reaches the network.
   See [Security](#security) for the limits that apply to writes.
