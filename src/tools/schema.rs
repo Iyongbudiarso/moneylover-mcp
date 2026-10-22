@@ -42,7 +42,8 @@ pub struct ListTransactionsInput {
     /// Wallet name, exactly as returned by list_wallets. Omit for all wallets, including archived
     /// ones and those excluded from Money Lover's total.
     pub wallet: Option<String>,
-    /// Only transactions in the category with this exact name (case-insensitive).
+    /// Only transactions whose category has this exact name (case-insensitive). For a sub-category
+    /// use the child's own name; a "Parent > Child" path does not match here.
     pub category: Option<String>,
     /// Maximum rows to return, newest first. Default 50, maximum 200.
     pub limit: Option<u32>,
@@ -200,13 +201,17 @@ pub struct TransactionOut {
     pub id: String,
     /// YYYY-MM-DD in the user's timezone.
     pub date: String,
+    /// Name of the wallet the transaction is in, as list_wallets returns it.
     pub wallet: String,
+    /// The category's own name; a sub-category appears without its parent.
     pub category: String,
     #[serde(rename = "type")]
     pub kind: Kind,
     /// Decimal string, always positive.
     pub amount: String,
+    /// ISO currency code, or null when it could not be resolved.
     pub currency: Option<String>,
+    /// Empty when no note was entered.
     pub note: String,
 }
 
@@ -296,7 +301,7 @@ pub struct AddTransactionOut {
     pub id: Option<String>,
     /// Resolved wallet name, not necessarily in the case it was given.
     pub wallet: String,
-    /// Resolved category, as "Parent > Child" for sub-categories.
+    /// Resolved category with its type, e.g. "Food > Lunch (expense)".
     pub category: String,
     /// Income or expense, taken from the resolved category.
     #[serde(rename = "type")]
