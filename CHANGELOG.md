@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
 
 Transactions can now be corrected and deleted, not only added, so a mistake no longer has to be
 fixed in the Money Lover app.
