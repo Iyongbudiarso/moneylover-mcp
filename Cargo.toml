@@ -1,6 +1,6 @@
 [package]
 name = "moneylover-mcp"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 # std::fs::File::try_lock
 rust-version = "1.89"

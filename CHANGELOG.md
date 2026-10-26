@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0
 
 Breaking: every tool name now starts with `moneylover_`, so the tools cannot clash with those of
 another MCP server in the same client. `list_wallets` is now `moneylover_list_wallets`, and so on
