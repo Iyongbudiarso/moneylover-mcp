@@ -180,29 +180,29 @@ async fn add_transaction_stays_listed_but_refuses_when_read_only() {
         .into_iter()
         .map(|t| t.name.to_string())
         .collect();
-    assert!(names.contains(&"list_wallets".to_string()));
-    assert!(names.contains(&"summarize_spending".to_string()));
+    assert!(names.contains(&"moneylover_list_wallets".to_string()));
+    assert!(names.contains(&"moneylover_summarize_spending".to_string()));
     // Listed, not hidden: a client (and a security scanner) sees the whole surface,
     // and the server, not the client, is what enforces read-only.
     for write_tool in [
-        "add_transaction",
-        "update_transaction",
-        "delete_transaction",
+        "moneylover_add_transaction",
+        "moneylover_update_transaction",
+        "moneylover_delete_transaction",
     ] {
         assert!(names.contains(&write_tool.to_string()), "{names:?}");
     }
 
     let attempts = [
         (
-            "add_transaction",
+            "moneylover_add_transaction",
             json!({"wallet": "MCP Test", "category": "Food", "amount": 5, "dry_run": true}),
         ),
         (
-            "update_transaction",
+            "moneylover_update_transaction",
             json!({"id": "t1", "wallet": "MCP Test", "date": "2026-04-18", "amount": 5, "dry_run": true}),
         ),
         (
-            "delete_transaction",
+            "moneylover_delete_transaction",
             json!({"id": "t1", "wallet": "MCP Test", "date": "2026-04-18", "dry_run": true}),
         ),
     ];
@@ -224,10 +224,14 @@ async fn write_flag_enables_add_transaction() {
     let client = h.connect(h.config(true, false)).await;
     let tools = client.list_all_tools().await.unwrap();
     assert_eq!(tools.len(), 7);
-    assert!(tools.iter().any(|t| t.name == "add_transaction"));
-    for name in ["update_transaction", "delete_transaction"] {
+    assert!(tools.iter().any(|t| t.name == "moneylover_add_transaction"));
+    for name in [
+        "moneylover_update_transaction",
+        "moneylover_delete_transaction",
+    ] {
         let tool = tools.iter().find(|t| t.name == name).unwrap();
         let annotations = tool.annotations.as_ref().unwrap();
+        assert!(tool.title.is_some(), "{name}");
         assert_eq!(annotations.read_only_hint, Some(false), "{name}");
         assert_eq!(annotations.destructive_hint, Some(true), "{name}");
     }
@@ -240,7 +244,7 @@ async fn lists_wallets_with_balances() {
     h.mount_basics().await;
     let client = h.connect(h.config(false, false)).await;
 
-    let result = call(&client, "list_wallets", json!({})).await;
+    let result = call(&client, "moneylover_list_wallets", json!({})).await;
     let wallets = structured(&result)["wallets"].as_array().unwrap().clone();
     assert_eq!(wallets.len(), 3);
     assert_eq!(wallets[0]["name"], "Cash");
@@ -257,7 +261,7 @@ async fn lists_categories_for_wallet_with_hierarchy_and_type_filter() {
 
     let result = call(
         &client,
-        "list_categories",
+        "moneylover_list_categories",
         json!({"wallet": "cash", "type": "expense"}),
     )
     .await;
@@ -269,7 +273,12 @@ async fn lists_categories_for_wallet_with_hierarchy_and_type_filter() {
         .collect();
     assert_eq!(names, ["Cash only", "Food", "Food > Lunch", "Other"]);
 
-    let result = call(&client, "list_categories", json!({"wallet": "MCP Test"})).await;
+    let result = call(
+        &client,
+        "moneylover_list_categories",
+        json!({"wallet": "MCP Test"}),
+    )
+    .await;
     let out = structured(&result);
     assert_eq!(out["kind"], "both income and expense");
     assert_eq!(out["wallet"], "MCP Test");
@@ -283,7 +292,12 @@ async fn lists_categories_for_wallet_with_hierarchy_and_type_filter() {
     assert!(!names.contains(&"Hidden".to_string()), "{names:?}");
 
     // Without a wallet, the per-wallet copies are collapsed.
-    let result = call(&client, "list_categories", json!({"type": "income"})).await;
+    let result = call(
+        &client,
+        "moneylover_list_categories",
+        json!({"type": "income"}),
+    )
+    .await;
     let names: Vec<String> = structured(&result)["categories"]
         .as_array()
         .unwrap()
@@ -335,13 +349,15 @@ async fn lists_transactions_newest_first_with_limit_and_timezone() {
 
     let result = call(
         &client,
-        "list_transactions",
+        "moneylover_list_transactions",
         json!({"start_date": "2026-04-01", "end_date": "2026-04-30", "wallet": "Cash", "limit": 2}),
     )
     .await;
     let out = structured(&result);
     assert_eq!(out["total_count"], 4, "the unparsable row is skipped");
-    assert_eq!(out["truncated"], true);
+    assert_eq!(out["offset"], 0);
+    assert_eq!(out["has_more"], true);
+    assert_eq!(out["next_offset"], 2);
     let txs = out["transactions"].as_array().unwrap();
     assert_eq!(txs.len(), 2);
     assert_eq!(txs[0]["id"], "t4");
@@ -349,10 +365,40 @@ async fn lists_transactions_newest_first_with_limit_and_timezone() {
     assert_eq!(txs[1]["amount"], "9000000");
     assert_eq!(txs[1]["currency"], "IDR");
 
+    // The next page picks up where the first left off, and is the last one.
+    let result = call(
+        &client,
+        "moneylover_list_transactions",
+        json!({"start_date": "2026-04-01", "end_date": "2026-04-30", "wallet": "Cash", "limit": 2, "offset": 2}),
+    )
+    .await;
+    let out = structured(&result);
+    let ids: Vec<&str> = out["transactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["t2", "t1"]);
+    assert_eq!(out["has_more"], false);
+    assert!(out["next_offset"].is_null());
+
+    // An offset past the end is an empty page, not an error.
+    let result = call(
+        &client,
+        "moneylover_list_transactions",
+        json!({"start_date": "2026-04-01", "end_date": "2026-04-30", "wallet": "Cash", "offset": 99}),
+    )
+    .await;
+    let out = structured(&result);
+    assert!(out["transactions"].as_array().unwrap().is_empty());
+    assert_eq!(out["total_count"], 4);
+    assert_eq!(out["has_more"], false);
+
     // Category filter and timezone conversion (18:30Z on the 17th is the 18th in Jakarta).
     let result = call(
         &client,
-        "list_transactions",
+        "moneylover_list_transactions",
         json!({"start_date": "2026-04-01", "end_date": "2026-04-30", "wallet": "Cash", "category": "LUNCH", "limit": 200}),
     )
     .await;
@@ -392,7 +438,7 @@ async fn summarizes_spending_per_category_and_skips_excluded() {
 
     let result = call(
         &client,
-        "summarize_spending",
+        "moneylover_summarize_spending",
         json!({"start_date": "2026-04-01", "end_date": "2026-04-30"}),
     )
     .await;
@@ -475,7 +521,7 @@ async fn all_wallets_includes_wallets_excluded_from_the_total_once() {
 
     let result = call(
         &client,
-        "list_transactions",
+        "moneylover_list_transactions",
         json!({"start_date": "2026-04-01", "end_date": "2026-04-30"}),
     )
     .await;
@@ -505,7 +551,7 @@ async fn a_full_page_from_all_falls_back_to_every_wallet() {
 
     let result = call(
         &client,
-        "list_transactions",
+        "moneylover_list_transactions",
         json!({"start_date": "2026-04-01", "end_date": "2026-04-30"}),
     )
     .await;
@@ -529,7 +575,7 @@ async fn a_full_page_from_one_wallet_is_an_error_not_a_wrong_total() {
 
     let result = call(
         &client,
-        "summarize_spending",
+        "moneylover_summarize_spending",
         json!({"start_date": "2026-04-01", "end_date": "2026-04-30", "wallet": "Cash"}),
     )
     .await;
@@ -558,7 +604,7 @@ async fn add_transaction_dry_run_never_writes() {
 
     let result = call(
         &client,
-        "add_transaction",
+        "moneylover_add_transaction",
         json!({"wallet": "mcp test", "category": "Food > Lunch", "amount": "50000", "date": recent_date(), "note": "nasi padang", "dry_run": true}),
     )
     .await;
@@ -594,7 +640,7 @@ async fn add_transaction_sends_resolved_ids_and_amount() {
 
     let result = call(
         &client,
-        "add_transaction",
+        "moneylover_add_transaction",
         json!({"wallet": "MCP Test", "category": "lunch", "amount": 50000, "date": recent_date(), "note": "nasi padang"}),
     )
     .await;
@@ -648,7 +694,7 @@ async fn add_transaction_rejects_bad_input_before_any_write() {
         ),
     ];
     for (args, expected) in cases {
-        let result = call(&client, "add_transaction", args.clone()).await;
+        let result = call(&client, "moneylover_add_transaction", args.clone()).await;
         assert_eq!(result.is_error, Some(true), "{args}");
         assert!(
             text_of(&result).contains(expected),
@@ -659,7 +705,7 @@ async fn add_transaction_rejects_bad_input_before_any_write() {
     // A type resolves the ambiguity.
     let ok = call(
         &client,
-        "add_transaction",
+        "moneylover_add_transaction",
         json!({"wallet": "MCP Test", "category": "Other", "amount": 5, "type": "income", "dry_run": true}),
     )
     .await;
@@ -695,8 +741,8 @@ async fn logs_in_once_and_persists_the_tokens() {
     let client = h.connect(h.config(false, true)).await;
 
     // Two calls, but only one login.
-    call(&client, "list_wallets", json!({})).await;
-    let result = call(&client, "list_wallets", json!({})).await;
+    call(&client, "moneylover_list_wallets", json!({})).await;
+    let result = call(&client, "moneylover_list_wallets", json!({})).await;
     assert_eq!(structured(&result)["wallets"].as_array().unwrap().len(), 3);
 
     let stored = load_tokens(&h.token_path()).unwrap().unwrap();
@@ -728,7 +774,7 @@ async fn refreshes_a_token_that_is_about_to_expire_without_logging_in() {
     h.mount_basics().await;
     let client = h.connect(h.config(false, true)).await;
 
-    let result = call(&client, "list_wallets", json!({})).await;
+    let result = call(&client, "moneylover_list_wallets", json!({})).await;
     assert_eq!(structured(&result)["wallets"].as_array().unwrap().len(), 3);
     let stored = load_tokens(&h.token_path()).unwrap().unwrap();
     assert_eq!(stored.access_token, "tok");
@@ -761,7 +807,7 @@ async fn a_rejected_token_triggers_one_refresh_then_succeeds() {
     h.mount_basics().await;
     let client = h.connect(h.config(false, false)).await;
 
-    let result = call(&client, "list_wallets", json!({})).await;
+    let result = call(&client, "moneylover_list_wallets", json!({})).await;
     assert_eq!(structured(&result)["wallets"].as_array().unwrap().len(), 3);
 }
 
@@ -778,7 +824,7 @@ async fn api_errors_become_tool_errors_not_crashes() {
         .await;
     let client = h.connect(h.config(false, false)).await;
 
-    let result = call(&client, "list_wallets", json!({})).await;
+    let result = call(&client, "moneylover_list_wallets", json!({})).await;
     assert_eq!(result.is_error, Some(true));
     assert!(text_of(&result).contains("something broke"));
 }
@@ -804,12 +850,12 @@ async fn reads_are_retried_on_server_errors_but_writes_are_not() {
         .await;
     let client = h.connect(h.config(true, false)).await;
 
-    let result = call(&client, "list_wallets", json!({})).await;
+    let result = call(&client, "moneylover_list_wallets", json!({})).await;
     assert_eq!(structured(&result)["wallets"].as_array().unwrap().len(), 3);
 
     let result = call(
         &client,
-        "add_transaction",
+        "moneylover_add_transaction",
         json!({"wallet": "MCP Test", "category": "Food", "amount": 5}),
     )
     .await;
@@ -856,16 +902,21 @@ async fn wallets_and_categories_are_cached_across_tools() {
         .await;
     let client = h.connect(h.config(true, false)).await;
 
-    let first = call(&client, "list_wallets", json!({})).await;
+    let first = call(&client, "moneylover_list_wallets", json!({})).await;
     assert_eq!(structured(&first)["from_cache"], false);
-    let second = call(&client, "list_wallets", json!({})).await;
+    let second = call(&client, "moneylover_list_wallets", json!({})).await;
     assert_eq!(structured(&second)["from_cache"], true);
     for _ in 0..2 {
-        let r = call(&client, "list_categories", json!({"wallet": "Cash"})).await;
+        let r = call(
+            &client,
+            "moneylover_list_categories",
+            json!({"wallet": "Cash"}),
+        )
+        .await;
         structured(&r);
         let r = call(
             &client,
-            "add_transaction",
+            "moneylover_add_transaction",
             json!({"wallet": "Cash", "category": "Food", "amount": 1, "dry_run": true}),
         )
         .await;
@@ -886,10 +937,10 @@ async fn refresh_bypasses_the_cache() {
         .await;
     let client = h.connect(h.config(false, false)).await;
 
-    call(&client, "list_wallets", json!({})).await;
-    let r = call(&client, "list_wallets", json!({"refresh": true})).await;
+    call(&client, "moneylover_list_wallets", json!({})).await;
+    let r = call(&client, "moneylover_list_wallets", json!({"refresh": true})).await;
     assert_eq!(structured(&r)["from_cache"], false);
-    let r = call(&client, "list_wallets", json!({})).await;
+    let r = call(&client, "moneylover_list_wallets", json!({})).await;
     assert_eq!(
         structured(&r)["from_cache"],
         true,
@@ -911,15 +962,15 @@ async fn a_write_invalidates_cached_balances() {
     h.mount("/transaction/add", json!({"_id": "t-new"})).await;
     let client = h.connect(h.config(true, false)).await;
 
-    call(&client, "list_wallets", json!({})).await;
+    call(&client, "moneylover_list_wallets", json!({})).await;
     let r = call(
         &client,
-        "add_transaction",
+        "moneylover_add_transaction",
         json!({"wallet": "Cash", "category": "Food", "amount": 1}),
     )
     .await;
     assert_eq!(structured(&r)["created"], true);
-    let r = call(&client, "list_wallets", json!({})).await;
+    let r = call(&client, "moneylover_list_wallets", json!({})).await;
     assert_eq!(
         structured(&r)["from_cache"],
         false,
@@ -952,12 +1003,22 @@ async fn a_wallet_missing_from_the_cache_triggers_one_fresh_fetch() {
     mount_categories_only(&h).await;
     let client = h.connect(h.config(false, false)).await;
 
-    call(&client, "list_wallets", json!({})).await;
-    let r = call(&client, "list_categories", json!({"wallet": "brand new"})).await;
+    call(&client, "moneylover_list_wallets", json!({})).await;
+    let r = call(
+        &client,
+        "moneylover_list_categories",
+        json!({"wallet": "brand new"}),
+    )
+    .await;
     assert_eq!(structured(&r)["categories"][0]["name"], "Food");
 
     // A name that really does not exist is still an error (after one fresh fetch, not a loop).
-    let r = call(&client, "list_categories", json!({"wallet": "Ghost"})).await;
+    let r = call(
+        &client,
+        "moneylover_list_categories",
+        json!({"wallet": "Ghost"}),
+    )
+    .await;
     assert_eq!(r.is_error, Some(true));
     assert!(text_of(&r).contains("Brand New"), "{}", text_of(&r));
 }
@@ -995,10 +1056,10 @@ async fn an_identical_write_is_refused_unless_explicitly_allowed() {
         .await;
 
     assert_eq!(
-        structured(&call(&client, "add_transaction", lunch(5)).await)["created"],
+        structured(&call(&client, "moneylover_add_transaction", lunch(5)).await)["created"],
         true
     );
-    let again = call(&client, "add_transaction", lunch(5)).await;
+    let again = call(&client, "moneylover_add_transaction", lunch(5)).await;
     assert_eq!(again.is_error, Some(true));
     assert!(
         text_of(&again).contains("allow_duplicate"),
@@ -1009,7 +1070,7 @@ async fn an_identical_write_is_refused_unless_explicitly_allowed() {
     let mut explicit = lunch(5);
     explicit["allow_duplicate"] = json!(true);
     assert_eq!(
-        structured(&call(&client, "add_transaction", explicit).await)["created"],
+        structured(&call(&client, "moneylover_add_transaction", explicit).await)["created"],
         true
     );
 }
@@ -1024,14 +1085,14 @@ async fn a_timed_out_write_is_reported_as_uncertain_and_blocks_a_blind_retry() {
         .mount(&h.mock)
         .await;
 
-    let first = call(&client, "add_transaction", lunch(7)).await;
+    let first = call(&client, "moneylover_add_transaction", lunch(7)).await;
     assert_eq!(first.is_error, Some(true));
     assert!(
         text_of(&first).starts_with("UNCERTAIN"),
         "{}",
         text_of(&first)
     );
-    let retry = call(&client, "add_transaction", lunch(7)).await;
+    let retry = call(&client, "moneylover_add_transaction", lunch(7)).await;
     assert!(
         text_of(&retry).contains("allow_duplicate"),
         "{}",
@@ -1045,9 +1106,9 @@ async fn hourly_write_limit_is_enforced() {
     h.mount("/transaction/add", json!({"_id": "t"})).await;
 
     for amount in [1, 2] {
-        structured(&call(&client, "add_transaction", lunch(amount)).await);
+        structured(&call(&client, "moneylover_add_transaction", lunch(amount)).await);
     }
-    let third = call(&client, "add_transaction", lunch(3)).await;
+    let third = call(&client, "moneylover_add_transaction", lunch(3)).await;
     assert!(
         text_of(&third).contains("write limit"),
         "{}",
@@ -1056,7 +1117,7 @@ async fn hourly_write_limit_is_enforced() {
     // Dry runs never count and still work.
     let mut preview = lunch(4);
     preview["dry_run"] = json!(true);
-    structured(&call(&client, "add_transaction", preview).await);
+    structured(&call(&client, "moneylover_add_transaction", preview).await);
 }
 
 #[tokio::test]
@@ -1085,7 +1146,7 @@ async fn configured_wallet_allowlist_amount_cap_and_date_window_are_enforced() {
         ),
     ];
     for (args, expected) in cases {
-        let result = call(&client, "add_transaction", args.clone()).await;
+        let result = call(&client, "moneylover_add_transaction", args.clone()).await;
         assert!(
             text_of(&result).contains(expected),
             "{args}: {}",
@@ -1112,7 +1173,7 @@ async fn redirects_are_never_followed() {
         .mount(&h.mock)
         .await;
     let client = h.connect(h.config(false, false)).await;
-    let result = call(&client, "list_wallets", json!({})).await;
+    let result = call(&client, "moneylover_list_wallets", json!({})).await;
     assert_eq!(result.is_error, Some(true));
 }
 
@@ -1140,7 +1201,7 @@ async fn a_wrong_password_is_not_retried_on_every_call() {
     let client = h.connect(h.config(false, true)).await;
 
     for _ in 0..3 {
-        let result = call(&client, "list_wallets", json!({})).await;
+        let result = call(&client, "moneylover_list_wallets", json!({})).await;
         assert!(
             text_of(&result).contains("wrong password"),
             "{}",
@@ -1171,7 +1232,7 @@ async fn a_removed_device_does_not_silently_log_in_again() {
     let client = h.connect(h.config(false, true)).await;
 
     for _ in 0..2 {
-        let result = call(&client, "list_wallets", json!({})).await;
+        let result = call(&client, "moneylover_list_wallets", json!({})).await;
         assert!(
             text_of(&result).contains("moneylover-mcp login"),
             "{}",
@@ -1213,7 +1274,7 @@ async fn a_token_refreshed_by_another_process_is_picked_up_instead_of_logging_in
 
     // Another process already rotated the tokens on disk.
     h.seed_token("tok", "ref-new", FAR_FUTURE);
-    let result = call(&client, "list_wallets", json!({})).await;
+    let result = call(&client, "moneylover_list_wallets", json!({})).await;
     assert_eq!(structured(&result)["wallets"].as_array().unwrap().len(), 3);
 }
 
@@ -1223,13 +1284,13 @@ async fn logout_stops_a_running_server_immediately() {
     h.seed_token("tok", "ref", FAR_FUTURE);
     h.mount_basics().await;
     let client = h.connect(h.config(false, true)).await;
-    structured(&call(&client, "list_wallets", json!({"refresh": true})).await);
+    structured(&call(&client, "moneylover_list_wallets", json!({"refresh": true})).await);
 
     // What `moneylover-mcp logout` does, from another process.
     moneylover_mcp::token_store::mark_revoked(&h.token_path());
     moneylover_mcp::token_store::delete_tokens(&h.token_path());
 
-    let result = call(&client, "list_wallets", json!({"refresh": true})).await;
+    let result = call(&client, "moneylover_list_wallets", json!({"refresh": true})).await;
     assert!(
         text_of(&result).contains("signed out"),
         "{}",
@@ -1259,7 +1320,7 @@ async fn a_device_removed_during_refresh_signs_out_instead_of_logging_in() {
         .await;
     let client = h.connect(h.config(false, true)).await;
 
-    let result = call(&client, "list_wallets", json!({})).await;
+    let result = call(&client, "moneylover_list_wallets", json!({})).await;
     assert!(
         text_of(&result).contains("signed out"),
         "{}",
@@ -1346,12 +1407,12 @@ async fn update_transaction_changes_only_what_was_asked_and_keeps_the_rest() {
     let args = json!({"id": "t1", "wallet": "MCP Test", "date": date, "category": "Food", "amount": 45000});
     let mut preview = args.clone();
     preview["dry_run"] = json!(true);
-    let out = structured(&call(&client, "update_transaction", preview).await).clone();
+    let out = structured(&call(&client, "moneylover_update_transaction", preview).await).clone();
     assert_eq!(out["updated"], false);
     assert_eq!(out["before"]["category"], "Lunch");
     assert_eq!(out["after"]["category"], "Food");
 
-    let out = structured(&call(&client, "update_transaction", args).await).clone();
+    let out = structured(&call(&client, "moneylover_update_transaction", args).await).clone();
     assert_eq!(out["updated"], true);
     assert_eq!(out["before"]["amount"], "50000");
     assert_eq!(out["after"]["amount"], "45000");
@@ -1379,7 +1440,7 @@ async fn update_transaction_can_move_the_date_and_clear_the_note() {
 
     let out = call(
         &client,
-        "update_transaction",
+        "moneylover_update_transaction",
         json!({"id": "t1", "wallet": "MCP Test", "date": date, "new_date": new_date, "note": "  "}),
     )
     .await;
@@ -1405,7 +1466,7 @@ async fn delete_transaction_sends_only_the_id_and_supports_dry_run() {
 
     let preview = call(
         &client,
-        "delete_transaction",
+        "moneylover_delete_transaction",
         json!({"id": "t1", "wallet": "MCP Test", "date": date, "dry_run": true}),
     )
     .await;
@@ -1415,7 +1476,7 @@ async fn delete_transaction_sends_only_the_id_and_supports_dry_run() {
 
     let done = call(
         &client,
-        "delete_transaction",
+        "moneylover_delete_transaction",
         json!({"id": "t1", "wallet": "MCP Test", "date": date}),
     )
     .await;
@@ -1441,67 +1502,67 @@ async fn update_and_delete_refuse_before_any_write() {
 
     let cases = [
         (
-            "update_transaction",
+            "moneylover_update_transaction",
             json!({"id": "t1", "wallet": "MCP Test", "date": date}),
             "nothing to change",
         ),
         (
-            "update_transaction",
+            "moneylover_update_transaction",
             json!({"id": "t1", "wallet": "MCP Test", "date": date, "type": "income"}),
             "nothing to change",
         ),
         (
-            "update_transaction",
+            "moneylover_update_transaction",
             json!({"id": "t1", "wallet": "MCP Test", "date": date, "note": "x", "type": "income"}),
             "only used together with category",
         ),
         (
-            "update_transaction",
+            "moneylover_update_transaction",
             json!({"id": "t1", "wallet": "MCP Test", "date": date, "amount": 100_001}),
             "MONEYLOVER_MAX_AMOUNT",
         ),
         (
-            "update_transaction",
+            "moneylover_update_transaction",
             json!({"id": "t1", "wallet": "MCP Test", "date": date, "new_date": "2001-01-01"}),
             "outside the allowed window",
         ),
         (
-            "update_transaction",
+            "moneylover_update_transaction",
             json!({"id": "t1", "wallet": "MCP Test", "date": date, "category": "Cash only"}),
             "not found",
         ),
         (
-            "update_transaction",
+            "moneylover_update_transaction",
             json!({"id": "t-cash", "wallet": "Cash", "date": date, "note": "x"}),
             "MONEYLOVER_WRITE_WALLETS",
         ),
         (
-            "delete_transaction",
+            "moneylover_delete_transaction",
             json!({"id": "t-cash", "wallet": "Cash", "date": date}),
             "MONEYLOVER_WRITE_WALLETS",
         ),
         (
-            "delete_transaction",
+            "moneylover_delete_transaction",
             json!({"id": "t-transfer", "wallet": "MCP Test", "date": date}),
             "transfer, debt or loan",
         ),
         (
-            "delete_transaction",
+            "moneylover_delete_transaction",
             json!({"id": "missing", "wallet": "MCP Test", "date": date}),
             "not found in wallet 'MCP Test'",
         ),
         (
-            "delete_transaction",
+            "moneylover_delete_transaction",
             json!({"id": "t1", "wallet": "Cash", "date": date}),
             "not found in wallet 'Cash'",
         ),
         (
-            "delete_transaction",
+            "moneylover_delete_transaction",
             json!({"id": "t1", "wallet": "Nope", "date": date}),
             "Available wallets",
         ),
         (
-            "delete_transaction",
+            "moneylover_delete_transaction",
             json!({"id": "t1", "wallet": "MCP Test", "date": "18/04/2026"}),
             "YYYY-MM-DD",
         ),
@@ -1536,7 +1597,7 @@ async fn transactions_outside_the_write_window_cannot_be_changed() {
 
     let result = call(
         &client,
-        "delete_transaction",
+        "moneylover_delete_transaction",
         json!({"id": "old", "wallet": "MCP Test", "date": "2001-01-01"}),
     )
     .await;
@@ -1568,7 +1629,7 @@ async fn a_timed_out_delete_is_reported_as_uncertain_and_counts_towards_the_limi
 
     let first = call(
         &client,
-        "delete_transaction",
+        "moneylover_delete_transaction",
         json!({"id": "t1", "wallet": "MCP Test", "date": date}),
     )
     .await;
@@ -1581,7 +1642,7 @@ async fn a_timed_out_delete_is_reported_as_uncertain_and_counts_towards_the_limi
     for _ in 0..2 {
         let rejected = call(
             &client,
-            "update_transaction",
+            "moneylover_update_transaction",
             json!({"id": "t1", "wallet": "MCP Test", "date": date, "note": "x"}),
         )
         .await;
@@ -1607,9 +1668,9 @@ async fn a_write_the_server_rejected_can_be_retried_without_allow_duplicate() {
         .await;
     h.mount("/transaction/add", json!({"_id": "t"})).await;
 
-    let first = call(&client, "add_transaction", lunch(9)).await;
+    let first = call(&client, "moneylover_add_transaction", lunch(9)).await;
     assert!(text_of(&first).contains("try later"), "{}", text_of(&first));
     assert!(!text_of(&first).contains("UNCERTAIN"));
-    let retry = call(&client, "add_transaction", lunch(9)).await;
+    let retry = call(&client, "moneylover_add_transaction", lunch(9)).await;
     assert_eq!(structured(&retry)["created"], true);
 }
