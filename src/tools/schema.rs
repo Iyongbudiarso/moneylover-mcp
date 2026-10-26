@@ -15,7 +15,7 @@ pub struct ListWalletsInput {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ListCategoriesInput {
-    /// Wallet name, exactly as returned by list_wallets (case-insensitive). Omit for the account-wide category list.
+    /// Wallet name, exactly as returned by moneylover_list_wallets (case-insensitive). Omit for the account-wide category list.
     pub wallet: Option<String>,
     /// Filter by category type: "income" or "expense". Omit to return both.
     #[serde(rename = "type")]
@@ -39,14 +39,17 @@ pub struct ListTransactionsInput {
     /// Last day of the range, inclusive, as YYYY-MM-DD. Must not be before start_date; the whole
     /// range may span at most 366 days.
     pub end_date: String,
-    /// Wallet name, exactly as returned by list_wallets. Omit for all wallets, including archived
-    /// ones and those excluded from Money Lover's total.
+    /// Wallet name, exactly as returned by moneylover_list_wallets. Omit for all wallets, including
+    /// archived ones and those excluded from Money Lover's total.
     pub wallet: Option<String>,
     /// Only transactions whose category has this exact name (case-insensitive). For a sub-category
     /// use the child's own name; a "Parent > Child" path does not match here.
     pub category: Option<String>,
     /// Maximum rows to return, newest first. Default 50, maximum 200.
     pub limit: Option<u32>,
+    /// Number of matching rows to skip, for paging. Default 0; pass next_offset from the previous
+    /// response, with the same filters, to get the next page.
+    pub offset: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -56,8 +59,8 @@ pub struct SummarizeInput {
     /// Last day of the range, inclusive, as YYYY-MM-DD. Must not be before start_date; the whole
     /// range may span at most 366 days.
     pub end_date: String,
-    /// Wallet name, exactly as returned by list_wallets. Omit to total across all wallets, including
-    /// archived ones and those excluded from Money Lover's total.
+    /// Wallet name, exactly as returned by moneylover_list_wallets. Omit to total across all wallets,
+    /// including archived ones and those excluded from Money Lover's total.
     pub wallet: Option<String>,
     /// Which side to total: "expense" (spending) or "income" (earnings). Defaults to "expense".
     #[serde(rename = "type")]
@@ -74,9 +77,9 @@ pub enum AmountInput {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct AddTransactionInput {
-    /// Wallet name, exactly as returned by list_wallets.
+    /// Wallet name, exactly as returned by moneylover_list_wallets.
     pub wallet: String,
-    /// Category name as returned by list_categories. Sub-categories may be written as "Parent > Child".
+    /// Category name as returned by moneylover_list_categories. Sub-categories may be written as "Parent > Child".
     pub category: String,
     /// Positive amount in the wallet's currency, e.g. 50000 or "12.50". Never negative.
     pub amount: AmountInput,
@@ -97,15 +100,15 @@ pub struct AddTransactionInput {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct UpdateTransactionInput {
-    /// Id of the transaction, exactly as returned by list_transactions.
+    /// Id of the transaction, exactly as returned by moneylover_list_transactions.
     pub id: String,
-    /// Name of the wallet the transaction is in, exactly as returned by list_transactions.
+    /// Name of the wallet the transaction is in, exactly as returned by moneylover_list_transactions.
     pub wallet: String,
-    /// The transaction's current date as YYYY-MM-DD, exactly as returned by list_transactions.
-    /// Used to find it; to move it to another day use new_date.
+    /// The transaction's current date as YYYY-MM-DD, exactly as returned by
+    /// moneylover_list_transactions. Used to find it; to move it to another day use new_date.
     pub date: String,
-    /// New category name as returned by list_categories for the transaction's wallet. Sub-categories
-    /// may be written as "Parent > Child". Omit to keep the current category.
+    /// New category name as returned by moneylover_list_categories for the transaction's wallet.
+    /// Sub-categories may be written as "Parent > Child". Omit to keep the current category.
     pub category: Option<String>,
     /// "income" or "expense". Only used with category, when that name exists as both.
     #[serde(rename = "type")]
@@ -131,11 +134,11 @@ impl UpdateTransactionInput {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct DeleteTransactionInput {
-    /// Id of the transaction, exactly as returned by list_transactions.
+    /// Id of the transaction, exactly as returned by moneylover_list_transactions.
     pub id: String,
-    /// Name of the wallet the transaction is in, exactly as returned by list_transactions.
+    /// Name of the wallet the transaction is in, exactly as returned by moneylover_list_transactions.
     pub wallet: String,
-    /// The transaction's date as YYYY-MM-DD, exactly as returned by list_transactions. Used to find it.
+    /// The transaction's date as YYYY-MM-DD, exactly as returned by moneylover_list_transactions. Used to find it.
     pub date: String,
     /// If true, find the transaction and run every check, but do not delete it.
     pub dry_run: Option<bool>,
@@ -197,11 +200,12 @@ pub struct CategoriesOut {
 
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct TransactionOut {
-    /// Pass together with wallet and date to update_transaction or delete_transaction.
+    /// Pass together with wallet and date to moneylover_update_transaction or
+    /// moneylover_delete_transaction.
     pub id: String,
     /// YYYY-MM-DD in the user's timezone.
     pub date: String,
-    /// Name of the wallet the transaction is in, as list_wallets returns it.
+    /// Name of the wallet the transaction is in, as moneylover_list_wallets returns it.
     pub wallet: String,
     /// The category's own name; a sub-category appears without its parent.
     pub category: String,
@@ -232,25 +236,35 @@ impl From<Transaction> for TransactionOut {
 
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct TransactionsOut {
-    /// Newest first, at most the requested limit.
+    /// This page, newest first, at most the requested limit.
     pub transactions: Vec<TransactionOut>,
-    /// Number of transactions that matched, before `limit` was applied.
+    /// Number of transactions that matched, across all pages.
     pub total_count: usize,
-    /// True when transactions were dropped to honour `limit`.
-    pub truncated: bool,
+    /// Number of matching rows skipped before this page.
+    pub offset: usize,
+    /// True when more matching rows follow this page.
+    pub has_more: bool,
+    /// Offset to pass for the next page; null when has_more is false.
+    pub next_offset: Option<usize>,
 }
 
 impl TransactionsOut {
-    pub fn first(transactions: Vec<Transaction>, limit: usize) -> Self {
+    pub fn page(transactions: Vec<Transaction>, offset: usize, limit: usize) -> Self {
         let total_count = transactions.len();
+        let rows: Vec<TransactionOut> = transactions
+            .into_iter()
+            .skip(offset)
+            .take(limit)
+            .map(Into::into)
+            .collect();
+        let end = offset.saturating_add(rows.len());
+        let has_more = end < total_count;
         Self {
-            transactions: transactions
-                .into_iter()
-                .take(limit)
-                .map(Into::into)
-                .collect(),
+            transactions: rows,
             total_count,
-            truncated: total_count > limit,
+            offset,
+            has_more,
+            next_offset: has_more.then_some(end),
         }
     }
 }

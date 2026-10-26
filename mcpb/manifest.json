@@ -61,37 +61,37 @@
     "allow_write": {
       "type": "boolean",
       "title": "Allow changing transactions",
-      "description": "Off by default. When on, add_transaction, update_transaction and delete_transaction work, so the assistant can create, correct and delete transactions (you can still fence it in with a wallet allowlist and a maximum amount via environment variables).",
+      "description": "Off by default. When on, moneylover_add_transaction, moneylover_update_transaction and moneylover_delete_transaction work, so the assistant can create, correct and delete transactions (you can still fence it in with a wallet allowlist and a maximum amount via environment variables).",
       "default": false
     }
   },
   "tools": [
     {
-      "name": "list_wallets",
+      "name": "moneylover_list_wallets",
       "description": "List every wallet with its currency and balance, to resolve wallet names for the other tools."
     },
     {
-      "name": "list_categories",
+      "name": "moneylover_list_categories",
       "description": "List income and expense categories, account-wide or for one wallet, to resolve category names."
     },
     {
-      "name": "list_transactions",
+      "name": "moneylover_list_transactions",
       "description": "List individual transactions in a date range, most recent first."
     },
     {
-      "name": "summarize_spending",
+      "name": "moneylover_summarize_spending",
       "description": "Total income or expenses per category, grouped by currency, for a date range."
     },
     {
-      "name": "add_transaction",
+      "name": "moneylover_add_transaction",
       "description": "Record one new transaction. Only works when writing is enabled; supports dry_run."
     },
     {
-      "name": "update_transaction",
+      "name": "moneylover_update_transaction",
       "description": "Correct the category, amount, note or date of an existing transaction. Only works when writing is enabled; supports dry_run."
     },
     {
-      "name": "delete_transaction",
+      "name": "moneylover_delete_transaction",
       "description": "Delete an existing transaction. Only works when writing is enabled; supports dry_run."
     }
   ],

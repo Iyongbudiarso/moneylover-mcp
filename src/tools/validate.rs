@@ -71,6 +71,10 @@ pub fn limit(requested: Option<u32>) -> usize {
         .clamp(1, MAX_LIMIT)
 }
 
+pub fn offset(requested: Option<u32>) -> usize {
+    requested.map_or(0, |n| n as usize)
+}
+
 pub fn parse_amount(input: &AmountInput) -> Result<Decimal> {
     let raw = match input {
         AmountInput::Number(n) => n.to_string(),
@@ -137,6 +141,12 @@ mod tests {
         assert_eq!(limit(None), 50);
         assert_eq!(limit(Some(0)), 1);
         assert_eq!(limit(Some(10_000)), 200);
+    }
+
+    #[test]
+    fn offset_defaults_to_the_first_row() {
+        assert_eq!(offset(None), 0);
+        assert_eq!(offset(Some(150)), 150);
     }
 
     #[test]

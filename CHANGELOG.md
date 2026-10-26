@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+Breaking: every tool name now starts with `moneylover_`, so the tools cannot clash with those of
+another MCP server in the same client. `list_wallets` is now `moneylover_list_wallets`, and so on
+for `list_categories`, `list_transactions`, `summarize_spending`, `add_transaction`,
+`update_transaction` and `delete_transaction`. Client configurations that allow or block tools by
+name need updating.
+
+- `moneylover_list_transactions` can now page through long results: it accepts `offset`, and the
+  response carries `offset`, `has_more` and `next_offset` instead of `truncated`. Previously the
+  only way past the 200-row cap was a shorter date range.
+- Every tool has a human-readable title, shown by clients that display one.
+
 ## 0.4.0
 
 Transactions can now be corrected and deleted, not only added, so a mistake no longer has to be

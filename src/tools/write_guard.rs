@@ -91,7 +91,8 @@ impl WriteGuard {
         if is_duplicate && !allow_duplicate {
             return Err(refused(format!(
                 "an identical transaction was sent less than {} minutes ago, so this looks like an accidental retry. \
-                 Check list_transactions first; if the user really wants a second identical transaction, call again with allow_duplicate=true",
+                 Check moneylover_list_transactions first; if the user really wants a second identical \
+                 transaction, call again with allow_duplicate=true",
                 DUPLICATE_WINDOW.as_secs() / 60
             )));
         }

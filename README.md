@@ -39,13 +39,13 @@ is enforced in code and checked in CI, not just stated here.
 
 | Tool | What it does | Needs write mode |
 |---|---|---|
-| `list_wallets` | Wallets with currency and balance (`refresh: true` for live balances) | no |
-| `list_categories` | Income/expense categories, for the whole account or one wallet | no |
-| `list_transactions` | Transactions in a date range, newest first (`limit` default 50, max 200) | no |
-| `summarize_spending` | Totals per category, grouped by currency, for a date range | no |
-| `add_transaction` | Create a transaction; supports `dry_run` | **yes** |
-| `update_transaction` | Change the category, amount, note or date of a transaction; supports `dry_run` | **yes** |
-| `delete_transaction` | Delete a transaction; supports `dry_run` | **yes** |
+| `moneylover_list_wallets` | Wallets with currency and balance (`refresh: true` for live balances) | no |
+| `moneylover_list_categories` | Income/expense categories, for the whole account or one wallet | no |
+| `moneylover_list_transactions` | Transactions in a date range, newest first, paged with `limit` (default 50, max 200) and `offset` | no |
+| `moneylover_summarize_spending` | Totals per category, grouped by currency, for a date range | no |
+| `moneylover_add_transaction` | Create a transaction; supports `dry_run` | **yes** |
+| `moneylover_update_transaction` | Change the category, amount, note or date of a transaction; supports `dry_run` | **yes** |
+| `moneylover_delete_transaction` | Delete a transaction; supports `dry_run` | **yes** |
 
 Design choices that matter for LLM use:
 
@@ -56,15 +56,15 @@ Design choices that matter for LLM use:
 - Money is returned as **decimal strings**, never floats.
 - Dates are `YYYY-MM-DD` in your configured timezone. A date range may cover at most **366 days**
   per call; the write tools accept dates from a year back up to a month ahead.
-- `update_transaction` and `delete_transaction` take the `id`, `wallet` **and** `date` that
-  `list_transactions` returns (Money Lover cannot look a transaction up by id alone). An update
+- `moneylover_update_transaction` and `moneylover_delete_transaction` take the `id`, `wallet` **and** `date` that
+  `moneylover_list_transactions` returns (Money Lover cannot look a transaction up by id alone). An update
   changes only the fields you pass and keeps the rest, including photo, location, event, people and
   the "exclude from report" flag. Moving a transaction to another wallet is not supported: delete it
   and add it again. Transfers, debts and loans are linked to other transactions and are refused;
   change those in the app.
-- `summarize_spending` skips transactions flagged "exclude from report"; `list_transactions`
+- `moneylover_summarize_spending` skips transactions flagged "exclude from report"; `moneylover_list_transactions`
   still lists them, so the two never disagree silently.
-- Without a `wallet`, `list_transactions` and `summarize_spending` cover **every** wallet, including
+- Without a `wallet`, `moneylover_list_transactions` and `moneylover_summarize_spending` cover **every** wallet, including
   archived wallets and wallets excluded from Money Lover's total. Money Lover's own "all wallets"
   query leaves those out and returns at most 9,999 rows, so the server asks for those wallets
   separately (and for every wallet one by one when the 9,999-row cap is hit). On accounts with many
@@ -77,7 +77,7 @@ Design choices that matter for LLM use:
 - Wallets and categories are **cached in memory** (5 minutes by default) because Money Lover's
   wallet list can take 30+ seconds on large accounts. Writing a transaction clears the cached
   balances, a name that is not in the cache triggers one fresh fetch (so a wallet you just created
-  is found), and `list_wallets` reports `from_cache` so an agent knows when balances may be stale.
+  is found), and `moneylover_list_wallets` reports `from_cache` so an agent knows when balances may be stale.
   Changes made in the Money Lover app itself show up after the cache expires or with `refresh: true`.
 
 ## Install
@@ -166,7 +166,7 @@ All configuration is through environment variables.
 | Variable | Default | Meaning |
 |---|---|---|
 | `MONEYLOVER_TIMEZONE` | `Asia/Jakarta` | IANA timezone for dates |
-| `MONEYLOVER_ALLOW_WRITE` | `false` | Set `true` to enable `add_transaction`, `update_transaction` and `delete_transaction` |
+| `MONEYLOVER_ALLOW_WRITE` | `false` | Set `true` to enable `moneylover_add_transaction`, `moneylover_update_transaction` and `moneylover_delete_transaction` |
 | `MONEYLOVER_WRITE_WALLETS` | – | Comma-separated wallet names; when set, writes go **only** to these |
 | `MONEYLOVER_MAX_AMOUNT` | – | When set, larger amounts are refused |
 | `MONEYLOVER_MAX_WRITES_PER_HOUR` | `20` | Adds, updates and deletes per rolling hour, combined (1-1000) |
@@ -248,7 +248,7 @@ What the server does to keep your account safe:
 - **Network.** HTTPS only, certificates checked against the OS trust store, redirects never
   followed (so a password or token can never be re-sent elsewhere), response size capped.
 - **Writes are off by default.** Without `MONEYLOVER_ALLOW_WRITE=true`, the write tools
-  (`add_transaction`, `update_transaction`, `delete_transaction`) still appear in the tool list but
+  (`moneylover_add_transaction`, `moneylover_update_transaction`, `moneylover_delete_transaction`) still appear in the tool list but
   answer with an error instead of calling Money Lover. When enabled, every write is checked by the
   server, not by the AI:
   - only wallets in `MONEYLOVER_WRITE_WALLETS` (if set), archived wallets never. For updates and
