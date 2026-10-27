@@ -1,6 +1,6 @@
 # Base images are pinned by digest (the tag is kept for readability); Dependabot
 # (docker) proposes updates.
-FROM rust:1.98-slim-bookworm@sha256:ff521445a372125ed4f76e1453a1f8098f2d05332d1601d30db1c1f62757e730 AS build
+FROM rust:1.99-slim-bookworm@sha256:86234e857a413004348b471d11a4ebe1aa92d2eae2b6b143cac68fd1ac3c48be AS build
 WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
